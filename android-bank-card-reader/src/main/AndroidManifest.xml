@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    
+    <!-- NFC permission required for reading cards -->
+    <uses-permission android:name="android.permission.NFC" />
+    
+    <!-- NFC feature declaration -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+    
+</manifest>
+
