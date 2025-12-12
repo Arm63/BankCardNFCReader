@@ -50,14 +50,14 @@ afterEvaluate {
             create<MavenPublication>("release") {
                 from(components["release"])
                 
-                groupId = "com.github.armenasatryan"
-                artifactId = "android-bank-card-reader"
+                groupId = "com.github.Arm63"
+                artifactId = "BankCardNFCReader"
                 version = "1.0.0"
                 
                 pom {
-                    name.set("Android Bank Card Reader")
+                    name.set("Bank Card NFC Reader")
                     description.set("Android library to read credit/debit card numbers via NFC - Visa, Mastercard, Amex supported")
-                    url.set("https://github.com/armenasatryan/BankCardReader")
+                    url.set("https://github.com/Arm63/BankCardNFCReader")
                     
                     licenses {
                         license {
@@ -68,7 +68,7 @@ afterEvaluate {
                     
                     developers {
                         developer {
-                            id.set("armenasatryan")
+                            id.set("Arm63")
                             name.set("Armen Asatryan")
                         }
                     }
