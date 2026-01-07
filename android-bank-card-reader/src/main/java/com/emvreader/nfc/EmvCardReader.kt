@@ -20,12 +20,23 @@ import java.util.Calendar
  * - JCB
  * - Mir
  * 
+ * Also detects payment source (physical card vs digital wallets):
+ * - Physical cards (traditional plastic EMV cards)
+ * - Google Wallet / Google Pay
+ * - Samsung Pay
+ * - Apple Pay
+ * - Other digital wallets
+ * 
  * Usage:
  * ```kotlin
  * val reader = EmvCardReader()
  * val result = reader.readCard(tag)
  * when (result) {
- *     is CardData.Success -> println("Card: ${result.formattedPan}")
+ *     is CardData.Success -> {
+ *         println("Card: ${result.formattedPan}")
+ *         println("Source: ${result.paymentSource.displayName}")
+ *         println("Is Wallet: ${result.isTokenizedWallet}")
+ *     }
  *     is CardData.Error -> println("Error: ${result.message}")
  * }
  * ```
@@ -36,13 +47,22 @@ class EmvCardReader(
     companion object {
         private const val TAG = "EmvCardReader"
     }
+    
+    /**
+     * Aggregated TLV data collected during card reading.
+     * Used for payment source detection.
+     */
+    private val collectedTlvData = mutableMapOf<String, TlvParser.TlvData>()
 
     /**
      * Read card data from NFC tag
      * @param tag The NFC tag detected by the system
-     * @return CardData with PAN information or error details
+     * @return CardData with PAN information, payment source detection, or error details
      */
     suspend fun readCard(tag: Tag): CardData = withContext(Dispatchers.IO) {
+        // Clear collected TLV data from previous reads
+        collectedTlvData.clear()
+        
         val isoDep = IsoDep.get(tag)
         
         if (isoDep == null) {
@@ -69,6 +89,7 @@ class EmvCardReader(
 
             // Step 2: Parse PPSE and extract AIDs
             val ppseData = TlvParser.parse(ppseResponse)
+            collectedTlvData.putAll(ppseData) // Collect for source detection
             val aids = extractAidsFromPpse(ppseData).ifEmpty { EmvConstants.KNOWN_AIDS }
             
             // Step 3: Try each AID
@@ -135,6 +156,7 @@ class EmvCardReader(
         }
 
         val selectData = TlvParser.parse(selectResponse.getData())
+        collectedTlvData.putAll(selectData) // Collect for source detection
 
         // Check for PAN in SELECT response
         TlvParser.extractPan(selectData)?.let { pan ->
@@ -160,6 +182,7 @@ class EmvCardReader(
         }
 
         val gpoData = TlvParser.parse(gpoResponse.getData())
+        collectedTlvData.putAll(gpoData) // Collect for source detection
 
         // Check for PAN in GPO response
         TlvParser.extractPan(gpoData)?.let { pan ->
@@ -179,6 +202,8 @@ class EmvCardReader(
                     
                     if (readResponse.isSuccess()) {
                         val recordData = TlvParser.parse(readResponse.getData())
+                        collectedTlvData.putAll(recordData) // Collect for source detection
+                        
                         TlvParser.extractPan(recordData)?.let { pan ->
                             if (pan.isValidPan()) {
                                 Log.d(TAG, "PAN found in SFI ${entry.sfi}, Record $record")
@@ -293,7 +318,10 @@ class EmvCardReader(
                 try {
                     val response = isoDep.transceive(ApduBuilder.readRecord(record, sfi))
                     if (response.isSuccess()) {
-                        TlvParser.extractPan(TlvParser.parse(response.getData()))?.let { pan ->
+                        val recordData = TlvParser.parse(response.getData())
+                        collectedTlvData.putAll(recordData) // Collect for source detection
+                        
+                        TlvParser.extractPan(recordData)?.let { pan ->
                             if (pan.isValidPan()) {
                                 Log.d(TAG, "PAN found via direct read: SFI $sfi, Record $record")
                                 return createSuccess(pan)
@@ -309,11 +337,19 @@ class EmvCardReader(
 
     private fun createSuccess(pan: String): CardData.Success {
         val cardType = CardType.detect(pan)
+        
+        // Detect payment source (physical card vs digital wallet)
+        val detectionResult = CardSourceDetector.detect(collectedTlvData)
+        Log.d(TAG, "Payment source detected: ${detectionResult.source.displayName} " +
+                   "(confidence: ${detectionResult.confidence})")
+        
         return CardData.Success(
             pan = pan,
             formattedPan = pan.formatPan(),
             maskedPan = pan.maskPan(),
-            cardType = cardType
+            cardType = cardType,
+            paymentSource = detectionResult.source,
+            sourceDetectionResult = detectionResult
         )
     }
 }

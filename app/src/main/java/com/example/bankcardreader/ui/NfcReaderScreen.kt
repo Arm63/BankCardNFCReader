@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bankcardreader.nfc.CardValidator
 import com.example.bankcardreader.nfc.NfcStatus
+import com.emvreader.nfc.PaymentSource
+import com.emvreader.nfc.CardSourceDetector
 
 @Composable
 fun NfcReaderScreen(
@@ -115,6 +117,9 @@ fun NfcReaderScreen(
                             SuccessContent(
                                 formattedPan = state.formattedPan,
                                 cardType = state.cardType,
+                                paymentSource = state.paymentSource,
+                                isTokenizedWallet = state.isTokenizedWallet,
+                                detectionConfidence = state.detectionConfidence,
                                 onConfirm = { onConfirmCard(state.pan) },
                                 onReset = onReset
                             )
@@ -499,9 +504,36 @@ private fun ReadingContent() {
 private fun SuccessContent(
     formattedPan: String,
     cardType: CardValidator.CardType,
+    paymentSource: PaymentSource,
+    isTokenizedWallet: Boolean,
+    detectionConfidence: CardSourceDetector.DetectionConfidence?,
     onConfirm: () -> Unit,
     onReset: () -> Unit
 ) {
+    // Get colors based on payment source
+    val sourceColor = when (paymentSource) {
+        PaymentSource.GOOGLE_WALLET -> Color(0xFF4285F4) // Google Blue
+        PaymentSource.SAMSUNG_PAY -> Color(0xFF1428A0)   // Samsung Blue
+        PaymentSource.APPLE_PAY -> Color(0xFF000000)     // Apple Black
+        PaymentSource.GARMIN_PAY -> Color(0xFF00A7E1)    // Garmin Blue
+        PaymentSource.FITBIT_PAY -> Color(0xFF00B0B9)    // Fitbit Teal
+        PaymentSource.MOBILE_WALLET -> Color(0xFF7C4DFF) // Purple for generic mobile wallet
+        PaymentSource.OTHER_WALLET -> Color(0xFF9C27B0)  // Purple for unknown wallet
+        PaymentSource.PHYSICAL_CARD -> Color(0xFF52B788) // Green for physical
+        PaymentSource.UNKNOWN -> Color(0xFF778DA9)       // Gray for unknown
+    }
+    
+    val sourceIcon = when (paymentSource) {
+        PaymentSource.GOOGLE_WALLET -> Icons.Outlined.Wallet
+        PaymentSource.SAMSUNG_PAY -> Icons.Outlined.PhoneAndroid
+        PaymentSource.APPLE_PAY -> Icons.Outlined.PhoneIphone
+        PaymentSource.GARMIN_PAY, PaymentSource.FITBIT_PAY -> Icons.Outlined.Watch
+        PaymentSource.MOBILE_WALLET -> Icons.Outlined.Smartphone // Generic mobile
+        PaymentSource.OTHER_WALLET -> Icons.Outlined.Wallet
+        PaymentSource.PHYSICAL_CARD -> Icons.Outlined.CreditCard
+        PaymentSource.UNKNOWN -> Icons.Outlined.CreditCard
+    }
+    
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -534,11 +566,11 @@ private fun SuccessContent(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Card preview
+        // Card preview with payment source info
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp),
+                .height(220.dp),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(
                 containerColor = Color(0xFF1B263B)
@@ -550,11 +582,19 @@ private fun SuccessContent(
                     .fillMaxSize()
                     .background(
                         Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF415A77),
-                                Color(0xFF1B263B),
-                                Color(0xFF0D1B2A)
-                            )
+                            colors = if (isTokenizedWallet) {
+                                listOf(
+                                    sourceColor.copy(alpha = 0.3f),
+                                    Color(0xFF1B263B),
+                                    Color(0xFF0D1B2A)
+                                )
+                            } else {
+                                listOf(
+                                    Color(0xFF415A77),
+                                    Color(0xFF1B263B),
+                                    Color(0xFF0D1B2A)
+                                )
+                            }
                         )
                     )
                     .padding(24.dp)
@@ -563,17 +603,28 @@ private fun SuccessContent(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // Top row: Source icon + Card type
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CreditCard,
-                            contentDescription = null,
-                            tint = Color(0xFFE0E1DD),
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = sourceIcon,
+                                contentDescription = null,
+                                tint = if (isTokenizedWallet) sourceColor else Color(0xFFE0E1DD),
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = paymentSource.displayName,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = if (isTokenizedWallet) sourceColor else Color(0xFF778DA9)
+                            )
+                        }
                         Text(
                             text = cardType.displayName,
                             style = MaterialTheme.typography.titleMedium.copy(
@@ -582,7 +633,8 @@ private fun SuccessContent(
                             color = Color(0xFF4CC9F0)
                         )
                     }
-
+                    
+                    // Middle: PAN
                     Text(
                         text = formattedPan,
                         style = MaterialTheme.typography.headlineMedium.copy(
@@ -591,6 +643,54 @@ private fun SuccessContent(
                         ),
                         color = Color(0xFFE0E1DD)
                     )
+                    
+                    // Bottom row: Tokenized indicator + Confidence
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isTokenizedWallet) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Security,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4CC9F0),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Tokenized (DPAN)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF4CC9F0)
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "Physical Card",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF778DA9)
+                            )
+                        }
+                        
+                        // Detection confidence indicator
+                        detectionConfidence?.let { confidence ->
+                            val confidenceText = when (confidence) {
+                                CardSourceDetector.DetectionConfidence.HIGH -> "●●●"
+                                CardSourceDetector.DetectionConfidence.MEDIUM -> "●●○"
+                                CardSourceDetector.DetectionConfidence.LOW -> "●○○"
+                            }
+                            Text(
+                                text = confidenceText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = when (confidence) {
+                                    CardSourceDetector.DetectionConfidence.HIGH -> Color(0xFF52B788)
+                                    CardSourceDetector.DetectionConfidence.MEDIUM -> Color(0xFFF4A261)
+                                    CardSourceDetector.DetectionConfidence.LOW -> Color(0xFF778DA9)
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }

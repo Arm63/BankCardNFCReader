@@ -1,18 +1,35 @@
 package com.emvreader.nfc
 
 /**
- * TLV (Tag-Length-Value) parser for EMV data structures
+ * TLV (Tag-Length-Value) parser for EMV data structures.
+ * 
+ * Parses BER-TLV encoded data as defined in EMV specifications.
+ * Supports nested/constructed tags and extracts payment-relevant data.
  */
-internal object TlvParser {
+object TlvParser {
     
+    // Card identity tags
     const val TAG_PAN = "5A"
     const val TAG_TRACK2 = "57"
     const val TAG_AID = "4F"
     const val TAG_DF_NAME = "84"
+    const val TAG_APPLICATION_LABEL = "50"
+    
+    // Processing tags
     const val TAG_PDOL = "9F38"
     const val TAG_AFL = "94"
     const val TAG_RESPONSE_FORMAT1 = "80"
     const val TAG_RESPONSE_FORMAT2 = "77"
+    
+    // Card source detection tags (for physical vs digital wallet detection)
+    /** Form Factor Indicator - indicates physical card vs mobile device */
+    const val TAG_FORM_FACTOR_INDICATOR = "9F6E"
+    /** Token Requestor ID - identifies wallet provider (Google, Samsung, Apple) */
+    const val TAG_TOKEN_REQUESTOR_ID = "9F19"
+    /** Track 2 Bit Map for Additional Data - may indicate tokenization */
+    const val TAG_TRACK2_BITMAP = "9F65"
+    /** Device Type - additional device identification */
+    const val TAG_DEVICE_TYPE = "9F6D"
 
     data class TlvData(val tag: String, val length: Int, val value: ByteArray)
 
@@ -145,4 +162,3 @@ internal object TlvParser {
     private fun List<Byte>.toHex(): String = joinToString("") { "%02X".format(it) }
     private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
 }
-

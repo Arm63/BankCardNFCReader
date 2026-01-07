@@ -8,10 +8,14 @@
 
 A lightweight Android library for reading bank card numbers (PAN) from contactless payment cards using NFC. Works with Visa, Mastercard, American Express, Discover, UnionPay, JCB, and Mir cards.
 
+**Now with Payment Source Detection!** Automatically detects if the scanned card is a physical plastic card or a digital wallet (Google Wallet, Apple Pay, Samsung Pay, etc.)
+
 ## 🔥 Features
 
 - 📱 **Read card numbers** from NFC-enabled credit/debit cards
 - 💳 **Multi-brand support**: Visa, Mastercard, Amex, Discover, UnionPay, JCB, Mir
+- 🔍 **Payment Source Detection**: Distinguish between physical cards and digital wallets
+- 📲 **Wallet Detection**: Identifies Google Wallet, Apple Pay, Samsung Pay, and more
 - 🔒 **Safe**: Read-only access - cannot make payments or modify card data
 - ⚡ **Kotlin Coroutines**: Modern async API
 - 🎯 **Easy integration**: Simple Activity lifecycle management
@@ -35,7 +39,8 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Arm63:BankCardNFCReader:1.0.0")
+    implementation("com.github.Arm63:BankCardNFCReader:1.1.0")
+}
 ```
 
 ## 🚀 Quick Start
@@ -53,9 +58,16 @@ class MainActivity : AppCompatActivity() {
             when (result) {
                 is CardData.Success -> {
                     // Card read successfully!
-                    val cardNumber = result.maskedPan  // "4111 **** **** 1111"
-                    val cardType = result.cardType     // CardType.VISA
-                    showCard(cardNumber, cardType.displayName)
+                    val cardNumber = result.maskedPan       // "4111 **** **** 1111"
+                    val cardType = result.cardType          // CardType.VISA
+                    val source = result.paymentSource       // PaymentSource.PHYSICAL_CARD
+                    val isWallet = result.isTokenizedWallet // false
+                    
+                    if (isWallet) {
+                        showWalletCard(cardNumber, source.displayName)
+                    } else {
+                        showPhysicalCard(cardNumber, cardType.displayName)
+                    }
                 }
                 is CardData.Error -> {
                     showError(result.message)
@@ -95,8 +107,18 @@ fun CardReaderScreen() {
         when (val result = cardData) {
             is CardData.Success -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("💳 ${result.cardType.displayName}", fontSize = 24.sp)
+                    // Show payment source
+                    Text(
+                        text = if (result.isTokenizedWallet) "📱 ${result.paymentSource.displayName}" 
+                               else "💳 Physical Card",
+                        fontSize = 18.sp
+                    )
+                    Text("${result.cardType.displayName}", fontSize = 24.sp)
                     Text(result.maskedPan, fontSize = 20.sp, fontFamily = FontFamily.Monospace)
+                    
+                    if (result.isTokenizedWallet) {
+                        Text("Tokenized (DPAN)", fontSize = 12.sp, color = Color.Gray)
+                    }
                 }
             }
             is CardData.Error -> Text("❌ ${result.message}", color = Color.Red)
@@ -106,16 +128,119 @@ fun CardReaderScreen() {
 }
 ```
 
+## 🔍 Payment Source Detection
+
+The library automatically detects whether the scanned card is a physical plastic card or a digital wallet:
+
+### How It Works
+
+The detection uses EMV tags from the card's response:
+
+| EMV Tag | Name | Purpose |
+|---------|------|---------|
+| **9F6E** | Form Factor Indicator | Identifies device type (card vs mobile) |
+| **9F19** | Token Requestor ID | Identifies specific wallet provider |
+| **50** | Application Label | May contain wallet identifiers |
+
+### Detection Logic
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Payment Source Detection                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Check Token Requestor ID (9F19)                         │
+│     ├─ Known ID → Specific Wallet (HIGH confidence)         │
+│     └─ Unknown ID → Other Wallet (MEDIUM confidence)        │
+│                                                             │
+│  2. Check Form Factor Indicator (9F6E)                      │
+│     ├─ Byte 2 Bit 8 = 0 → Physical Card (not connected)     │
+│     └─ Byte 2 Bit 8 = 1 → Mobile Wallet (network connected) │
+│                                                             │
+│  3. Check Application Label (50)                            │
+│     └─ Contains wallet keywords → Infer wallet type         │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Supported Payment Sources
+
+| Payment Source | Detection Method | Confidence |
+|----------------|------------------|------------|
+| **Physical Card** | Form Factor (not network-connected) | HIGH |
+| **Google Wallet** | Token Requestor ID | HIGH |
+| **Samsung Pay** | Token Requestor ID | HIGH |
+| **Apple Pay** | Token Requestor ID | HIGH |
+| **Garmin Pay** | Token Requestor ID | HIGH |
+| **Fitbit Pay** | Token Requestor ID | HIGH |
+| **Mobile Wallet** | Form Factor (network-connected, unknown provider) | HIGH |
+
+### Example Detection Results
+
+```kotlin
+// Physical Visa card
+result.paymentSource      // PaymentSource.PHYSICAL_CARD
+result.isTokenizedWallet  // false
+result.isPhysicalCard     // true
+
+// Google Wallet on Android phone
+result.paymentSource      // PaymentSource.MOBILE_WALLET (or GOOGLE_WALLET if Token ID present)
+result.isTokenizedWallet  // true
+result.isPhysicalCard     // false
+
+// Apple Pay on iPhone
+result.paymentSource      // PaymentSource.MOBILE_WALLET
+result.isTokenizedWallet  // true
+```
+
+### Detection Result Details
+
+For debugging or advanced use, access the full detection result:
+
+```kotlin
+when (result) {
+    is CardData.Success -> {
+        result.sourceDetectionResult?.let { detection ->
+            Log.d("Detection", "Source: ${detection.source}")
+            Log.d("Detection", "Confidence: ${detection.confidence}")
+            Log.d("Detection", "Form Factor: ${detection.formFactorIndicator?.toHex()}")
+            Log.d("Detection", "Token Requestor ID: ${detection.tokenRequestorId}")
+            Log.d("Detection", "Debug Info: ${detection.debugInfo}")
+        }
+    }
+}
+```
+
 ## 📖 API Reference
 
 ### CardData.Success
 
-| Property | Type | Example |
-|----------|------|---------|
-| `pan` | String | `"4111111111111111"` |
-| `formattedPan` | String | `"4111 1111 1111 1111"` |
-| `maskedPan` | String | `"4111 **** **** 1111"` |
-| `cardType` | CardType | `CardType.VISA` |
+| Property | Type | Example | Description |
+|----------|------|---------|-------------|
+| `pan` | String | `"4111111111111111"` | Raw card number (DPAN for wallets) |
+| `formattedPan` | String | `"4111 1111 1111 1111"` | Formatted with spaces |
+| `maskedPan` | String | `"4111 **** **** 1111"` | Masked for display |
+| `cardType` | CardType | `CardType.VISA` | Card brand |
+| `paymentSource` | PaymentSource | `PaymentSource.PHYSICAL_CARD` | Source type |
+| `isTokenizedWallet` | Boolean | `false` | Is it a digital wallet? |
+| `isPhysicalCard` | Boolean | `true` | Is it a physical card? |
+| `sourceDetectionResult` | DetectionResult? | - | Full detection details |
+
+### PaymentSource Enum
+
+```kotlin
+enum class PaymentSource {
+    PHYSICAL_CARD,   // Traditional plastic card
+    GOOGLE_WALLET,   // Google Wallet / Google Pay
+    SAMSUNG_PAY,     // Samsung Pay
+    APPLE_PAY,       // Apple Pay
+    GARMIN_PAY,      // Garmin Pay
+    FITBIT_PAY,      // Fitbit Pay
+    MOBILE_WALLET,   // Generic mobile wallet (provider unknown)
+    OTHER_WALLET,    // Other digital wallet
+    UNKNOWN          // Could not determine
+}
+```
 
 ### Supported Card Types
 
@@ -153,12 +278,18 @@ The library includes NFC permission automatically. Add this to your app if you w
 ## ⚠️ Security Notes
 
 This library **only reads** publicly available card data:
-- ✅ Card number (PAN)
+- ✅ Card number (PAN / DPAN for wallets)
 - ✅ Card type detection
+- ✅ Payment source detection
 - ❌ Cannot read CVV/CVC
 - ❌ Cannot read PIN
 - ❌ Cannot make transactions
 - ❌ Cannot clone cards
+
+**Important for Tokenized Wallets:**
+- The PAN returned from digital wallets is a **DPAN** (Device Primary Account Number)
+- This is a tokenized number, not the actual card number
+- DPANs are device-specific and cannot be used on other devices
 
 Handle card numbers according to PCI-DSS if applicable.
 
@@ -181,7 +312,17 @@ val reader = EmvCardReader()
 nfcAdapter.enableReaderMode(activity, { tag ->
     lifecycleScope.launch {
         val result = reader.readCard(tag)
-        // Handle result
+        when (result) {
+            is CardData.Success -> {
+                Log.d("Card", "PAN: ${result.maskedPan}")
+                Log.d("Card", "Type: ${result.cardType}")
+                Log.d("Card", "Source: ${result.paymentSource}")
+                Log.d("Card", "Is Wallet: ${result.isTokenizedWallet}")
+            }
+            is CardData.Error -> {
+                Log.e("Card", "Error: ${result.message}")
+            }
+        }
     }
 }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B, null)
 ```
@@ -196,6 +337,32 @@ val manager = NfcCardManager(
 )
 ```
 
+### Standalone Source Detection
+
+Use the `CardSourceDetector` for custom detection logic:
+
+```kotlin
+// If you have TLV data from your own card reading
+val detectionResult = CardSourceDetector.detect(tlvData)
+
+Log.d("Detection", "Source: ${detectionResult.source}")
+Log.d("Detection", "Confidence: ${detectionResult.confidence}")
+Log.d("Detection", "Is Wallet: ${detectionResult.source.isDigitalWallet}")
+```
+
+## 🧪 Testing
+
+### Testing with Physical Cards
+- Any contactless Visa, Mastercard, etc. card should work
+- The detection should return `PaymentSource.PHYSICAL_CARD`
+
+### Testing with Digital Wallets
+- **Google Wallet**: Add a card to Google Wallet, tap phone to your test device
+- **Apple Pay**: Add a card to Apple Pay, tap iPhone to your test device
+- **Samsung Pay**: Add a card to Samsung Pay, tap Samsung phone to your test device
+
+Note: Without Token Requestor ID, wallets will be detected as `MOBILE_WALLET` (provider unknown).
+
 ## 📄 License
 
 ```
@@ -206,6 +373,14 @@ MIT License - Copyright (c) 2025 Armen Asatryan
 
 Pull requests welcome! Please open an issue first for major changes.
 
+### Development Setup
+
+```bash
+git clone https://github.com/ArmenAsatryan/android-bank-card-reader.git
+cd android-bank-card-reader
+./gradlew build
+```
+
 ## 🔗 Links
 
 - [JitPack](https://jitpack.io/#ArmenAsatryan/android-bank-card-reader)
@@ -213,4 +388,4 @@ Pull requests welcome! Please open an issue first for major changes.
 
 ---
 
-**Keywords**: android nfc card reader, read credit card android, bank card reader nfc, contactless card reader android, visa mastercard reader android, emv card reader, kotlin nfc library
+**Keywords**: android nfc card reader, read credit card android, bank card reader nfc, contactless card reader android, visa mastercard reader android, emv card reader, kotlin nfc library, google wallet detection, apple pay detection, digital wallet detection, tokenized card reader

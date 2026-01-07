@@ -40,6 +40,9 @@ android {
 }
 
 dependencies {
+    // Library module for NFC card reading with payment source detection
+    implementation(project(":android-bank-card-reader"))
+    
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

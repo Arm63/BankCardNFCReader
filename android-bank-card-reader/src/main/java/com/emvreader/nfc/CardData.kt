@@ -7,17 +7,35 @@ sealed class CardData {
     /**
      * Successfully read card data
      * 
-     * @property pan Raw Primary Account Number (card number)
+     * @property pan Raw Primary Account Number (card number). 
+     *               Note: For tokenized wallets, this is the DPAN (Device PAN), not the actual card number.
      * @property formattedPan PAN formatted with spaces (e.g., "4111 1111 1111 1111")
      * @property maskedPan PAN with middle digits masked (e.g., "4111 **** **** 1111")
-     * @property cardType Detected card brand
+     * @property cardType Detected card brand (Visa, Mastercard, etc.)
+     * @property paymentSource Source of the payment (physical card, Google Wallet, Samsung Pay, etc.)
+     * @property sourceDetectionResult Detailed detection result with confidence and debug info
      */
     data class Success(
         val pan: String,
         val formattedPan: String,
         val maskedPan: String,
-        val cardType: CardType
-    ) : CardData()
+        val cardType: CardType,
+        val paymentSource: PaymentSource = PaymentSource.UNKNOWN,
+        val sourceDetectionResult: CardSourceDetector.DetectionResult? = null
+    ) : CardData() {
+        
+        /**
+         * Whether the card data came from a digital wallet (Google Wallet, Samsung Pay, etc.)
+         */
+        val isTokenizedWallet: Boolean
+            get() = paymentSource.isDigitalWallet
+        
+        /**
+         * Whether the card is a physical plastic card
+         */
+        val isPhysicalCard: Boolean
+            get() = paymentSource.isPhysicalCard
+    }
 
     /**
      * Error reading card
@@ -89,4 +107,3 @@ enum class ErrorCode {
     /** Unexpected error */
     UNKNOWN
 }
-
