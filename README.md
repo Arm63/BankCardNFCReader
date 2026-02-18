@@ -39,7 +39,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Arm63:BankCardNFCReader:1.1.0")
+    implementation("com.github.Arm63:BankCardNFCReader:1.1.2")
 }
 ```
 
@@ -380,6 +380,27 @@ git clone https://github.com/ArmenAsatryan/android-bank-card-reader.git
 cd android-bank-card-reader
 ./gradlew build
 ```
+
+## 📝 Changelog
+
+### v1.1.2 (Current)
+- Stabilized on Android SDK 35 with androidx.core 1.15.0
+- Improved dependency compatibility and stability
+
+### v1.1.1
+- Updated dependencies for better compatibility
+- Minor bug fixes and improvements
+
+### v1.1.0
+- Added payment source detection (physical cards vs digital wallets)
+- Support for detecting Google Wallet, Apple Pay, Samsung Pay, and more
+- Enhanced card reading with tokenized wallet detection
+- Improved EMV tag parsing for Form Factor Indicator and Token Requestor ID
+
+### v1.0.0
+- Initial release with NFC card reading support
+- Multi-brand support: Visa, Mastercard, Amex, Discover, UnionPay, JCB, Mir
+- Simple API with `NfcCardManager` and `EmvCardReader`
 
 ## 🔗 Links
 
