@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.emvreader.nfc"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 21
@@ -52,7 +52,7 @@ afterEvaluate {
                 
                 groupId = "com.github.Arm63"
                 artifactId = "BankCardNFCReader"
-                version = "1.1.1"
+                version = "1.1.2"
                 
                 pom {
                     name.set("Bank Card NFC Reader")
