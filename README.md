@@ -49,12 +49,33 @@ dependencies {
 
 ```kotlin
 class MainActivity : AppCompatActivity() {
-    private lateinit var cardReader: NfcCardManager
+    private val cardReader = EmvCardReader()
+    private var nfcAdapter: NfcAdapter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        cardReader = NfcCardManager(this) { result ->
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Enable NFC reader mode
+        nfcAdapter?.enableReaderMode(
+            this,
+            { tag -> handleNfcTag(tag) },
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B,
+            null
+        )
+    }
+
+    override fun onPause() {
+        super.onPause()
+        nfcAdapter?.disableReaderMode(this)
+    }
+
+    private fun handleNfcTag(tag: Tag) {
+        lifecycleScope.launch {
+            val result = cardReader.readCard(tag)
             when (result) {
                 is CardData.Success -> {
                     // Card read successfully!
@@ -75,16 +96,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    override fun onResume() {
-        super.onResume()
-        cardReader.enableReading()  // Start listening for cards
-    }
-
-    override fun onPause() {
-        super.onPause()
-        cardReader.disableReading() // Stop when app is in background
-    }
 }
 ```
 
@@ -96,11 +107,23 @@ fun CardReaderScreen() {
     val context = LocalContext.current
     val activity = context as Activity
     var cardData by remember { mutableStateOf<CardData?>(null) }
+    val cardReader = remember { EmvCardReader() }
     
     DisposableEffect(Unit) {
-        val manager = NfcCardManager(activity) { cardData = it }
-        manager.enableReading()
-        onDispose { manager.disableReading() }
+        val nfcAdapter = NfcAdapter.getDefaultAdapter(activity)
+        nfcAdapter?.enableReaderMode(
+            activity,
+            { tag ->
+                CoroutineScope(Dispatchers.Main).launch {
+                    cardData = cardReader.readCard(tag)
+                }
+            },
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B,
+            null
+        )
+        onDispose { 
+            nfcAdapter?.disableReaderMode(activity)
+        }
     }
     
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -301,39 +324,11 @@ Handle card numbers according to PCI-DSS if applicable.
 
 ## 🔧 Advanced Usage
 
-### Low-Level Reader
-
-For more control, use `EmvCardReader` directly:
-
-```kotlin
-val reader = EmvCardReader()
-
-// In your NFC callback
-nfcAdapter.enableReaderMode(activity, { tag ->
-    lifecycleScope.launch {
-        val result = reader.readCard(tag)
-        when (result) {
-            is CardData.Success -> {
-                Log.d("Card", "PAN: ${result.maskedPan}")
-                Log.d("Card", "Type: ${result.cardType}")
-                Log.d("Card", "Source: ${result.paymentSource}")
-                Log.d("Card", "Is Wallet: ${result.isTokenizedWallet}")
-            }
-            is CardData.Error -> {
-                Log.e("Card", "Error: ${result.message}")
-            }
-        }
-    }
-}, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B, null)
-```
-
 ### Custom Timeout
 
 ```kotlin
-val manager = NfcCardManager(
-    activity = this,
-    config = ReaderConfig(timeoutMs = 10000),  // 10 seconds
-    onCardRead = { result -> /* ... */ }
+val reader = EmvCardReader(
+    config = ReaderConfig(timeoutMs = 10000)  // 10 seconds
 )
 ```
 
@@ -400,7 +395,7 @@ cd android-bank-card-reader
 ### v1.0.0
 - Initial release with NFC card reading support
 - Multi-brand support: Visa, Mastercard, Amex, Discover, UnionPay, JCB, Mir
-- Simple API with `NfcCardManager` and `EmvCardReader`
+- Simple API with `EmvCardReader`
 
 ## 🔗 Links
 
