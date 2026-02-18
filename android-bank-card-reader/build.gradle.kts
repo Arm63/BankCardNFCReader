@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.emvreader.nfc"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 21
@@ -36,7 +36,7 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     
     testImplementation("junit:junit:4.13.2")
