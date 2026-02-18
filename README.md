@@ -39,7 +39,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Arm63:BankCardNFCReader:1.1.2")
+    implementation("com.github.Arm63:BankCardNFCReader:1.1.3")
 }
 ```
 
@@ -378,7 +378,13 @@ cd android-bank-card-reader
 
 ## 📝 Changelog
 
-### v1.1.2 (Current)
+### v1.1.3 (Current)
+- Removed unused `NfcCardManager` class (use `EmvCardReader` directly)
+- Removed all debug logging for production builds
+- Simplified API with single reader class
+- Updated documentation and examples
+
+### v1.1.2
 - Stabilized on Android SDK 35 with androidx.core 1.15.0
 - Improved dependency compatibility and stability
 
