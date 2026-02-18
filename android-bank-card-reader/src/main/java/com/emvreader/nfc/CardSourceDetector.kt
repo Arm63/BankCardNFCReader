@@ -1,7 +1,5 @@
 package com.emvreader.nfc
 
-import android.util.Log
-
 /**
  * Detects the source/origin of a payment card from EMV data.
  * 
@@ -45,9 +43,6 @@ import android.util.Log
  * @see PaymentSource
  */
 object CardSourceDetector {
-    
-    private const val TAG = "CardSourceDetector"
-    
     // EMV Tag identifiers
     internal const val TAG_FORM_FACTOR_INDICATOR = "9F6E"
     internal const val TAG_TOKEN_REQUESTOR_ID = "9F19"
@@ -217,8 +212,6 @@ object CardSourceDetector {
      * @return DetectionResult with identified source and metadata
      */
     fun detect(tlvData: Map<String, TlvParser.TlvData>): DetectionResult {
-        Log.d(TAG, "Starting payment source detection")
-        
         // Extract relevant tags
         val formFactorIndicator = tlvData[TAG_FORM_FACTOR_INDICATOR]?.value
         val tokenRequestorIdRaw = tlvData[TAG_TOKEN_REQUESTOR_ID]?.value
@@ -228,10 +221,6 @@ object CardSourceDetector {
         
         // Convert Token Requestor ID to string (it's typically stored as numeric ASCII or BCD)
         val tokenRequestorId = tokenRequestorIdRaw?.let { parseTokenRequestorId(it) }
-        
-        Log.d(TAG, "Form Factor: ${formFactorIndicator?.toHex() ?: "null"}")
-        Log.d(TAG, "Token Requestor ID: $tokenRequestorId")
-        Log.d(TAG, "Application Label: $applicationLabel")
         
         val debugInfo = buildString {
             appendLine("Form Factor Indicator (9F6E): ${formFactorIndicator?.toHex() ?: "not present"}")
@@ -243,7 +232,6 @@ object CardSourceDetector {
         if (tokenRequestorId != null) {
             val walletFromToken = identifyWalletFromTokenRequestorId(tokenRequestorId)
             if (walletFromToken != PaymentSource.UNKNOWN) {
-                Log.d(TAG, "Detected wallet from Token Requestor ID: $walletFromToken")
                 return DetectionResult(
                     source = walletFromToken,
                     formFactorIndicator = formFactorIndicator,
@@ -278,7 +266,6 @@ object CardSourceDetector {
             val walletFromLabel = identifyWalletFromLabel(applicationLabel)
             
             if (walletFromLabel != null) {
-                Log.d(TAG, "Detected wallet from Application Label: $walletFromLabel")
                 return DetectionResult(
                     source = walletFromLabel,
                     formFactorIndicator = formFactorIndicator,
@@ -292,7 +279,6 @@ object CardSourceDetector {
             val normalizedLabel = applicationLabel.uppercase()
             if (normalizedLabel.contains("WALLET") || 
                 (normalizedLabel.contains("PAY") && !normalizedLabel.contains("PREPAY"))) {
-                Log.d(TAG, "Detected generic wallet from Application Label")
                 return DetectionResult(
                     source = PaymentSource.OTHER_WALLET,
                     formFactorIndicator = formFactorIndicator,
@@ -305,7 +291,6 @@ object CardSourceDetector {
         
         // Default: If no wallet indicators found, assume physical card
         // Most contactless reads without wallet indicators are physical cards
-        Log.d(TAG, "No wallet indicators found, defaulting to physical card")
         return DetectionResult(
             source = PaymentSource.PHYSICAL_CARD,
             formFactorIndicator = formFactorIndicator,
@@ -361,7 +346,6 @@ object CardSourceDetector {
         val isMobileExact = MOBILE_FORM_FACTORS.any { it.contentEquals(formFactorIndicator) }
         
         if (isPhysicalExact) {
-            Log.d(TAG, "Detected physical card from Form Factor (exact match)")
             return DetectionResult(
                 source = PaymentSource.PHYSICAL_CARD,
                 formFactorIndicator = formFactorIndicator,
@@ -372,8 +356,6 @@ object CardSourceDetector {
         }
         
         if (isMobileExact) {
-            Log.d(TAG, "Detected mobile device from Form Factor (Mastercard-style exact match)")
-            
             // Try to identify specific wallet from application label
             val walletFromLabel = applicationLabel?.let { identifyWalletFromLabel(it) }
             
@@ -395,14 +377,8 @@ object CardSourceDetector {
             val byte2 = formFactorIndicator[1].toInt() and 0xFF
             val isNetworkConnected = (byte2 and 0x80) != 0  // Bit 8 of byte 2
             
-            Log.d(TAG, "Visa Form Factor analysis:")
-            Log.d(TAG, "  Byte 1: 0x${firstByte.toString(16).uppercase().padStart(2, '0')}")
-            Log.d(TAG, "  Byte 2: 0x${byte2.toString(16).uppercase().padStart(2, '0')}")
-            Log.d(TAG, "  Network Connected (byte2 bit8): $isNetworkConnected")
-            
             if (!isNetworkConnected) {
                 // Device is NOT connected to network = Physical card
-                Log.d(TAG, "Detected PHYSICAL CARD (device not network-connected)")
                 return DetectionResult(
                     source = PaymentSource.PHYSICAL_CARD,
                     formFactorIndicator = formFactorIndicator,
@@ -422,8 +398,6 @@ object CardSourceDetector {
                     else -> "Mobile Device"
                 }
                 
-                Log.d(TAG, "Detected $deviceType (network-connected device)")
-                
                 // Try to identify specific wallet from application label
                 val walletFromLabel = applicationLabel?.let { identifyWalletFromLabel(it) }
                 
@@ -436,8 +410,6 @@ object CardSourceDetector {
                 } else {
                     DetectionConfidence.HIGH // High confidence it's a mobile wallet, just don't know which
                 }
-                
-                Log.d(TAG, "Detected wallet: ${inferredWallet.displayName} (specific provider ${if (walletFromLabel != null) "identified" else "unknown"})")
                 
                 return DetectionResult(
                     source = inferredWallet,
@@ -452,7 +424,6 @@ object CardSourceDetector {
         // ===== FALLBACK: Single byte form factors =====
         // Check Mastercard-style byte values (not nibble-based)
         if (firstByte in 0x01..0x03) {
-            Log.d(TAG, "Detected physical card from Form Factor byte value: 0x${firstByte.toString(16)}")
             return DetectionResult(
                 source = PaymentSource.PHYSICAL_CARD,
                 formFactorIndicator = formFactorIndicator,
@@ -464,7 +435,6 @@ object CardSourceDetector {
         
         if (firstByte in 0x05..0x06) {
             val deviceType = if (firstByte == 0x05) "Mobile Phone" else "Wearable"
-            Log.d(TAG, "Detected $deviceType from Form Factor byte value: 0x${firstByte.toString(16)}")
             
             // Try to identify specific wallet
             val walletFromLabel = applicationLabel?.let { identifyWalletFromLabel(it) }

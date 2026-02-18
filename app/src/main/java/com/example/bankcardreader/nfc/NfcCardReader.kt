@@ -2,7 +2,6 @@ package com.example.bankcardreader.nfc
 
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -13,7 +12,6 @@ import kotlinx.coroutines.withContext
 class NfcCardReader {
 
     companion object {
-        private const val TAG = "NfcCardReader"
         private const val TIMEOUT_MS = 5000
     }
 
@@ -25,19 +23,16 @@ class NfcCardReader {
         val isoDep = IsoDep.get(tag)
         
         if (isoDep == null) {
-            Log.e(TAG, "IsoDep not supported on this card")
             return@withContext CardReadResult.Error(CardReadError.UNSUPPORTED_CARD)
         }
 
         try {
             isoDep.timeout = TIMEOUT_MS
             isoDep.connect()
-            Log.d(TAG, "Connected to card, max transceive length: ${isoDep.maxTransceiveLength}")
 
             // Step 1: Select PPSE to get available payment applications
             val ppseResponse = selectPpse(isoDep)
             if (ppseResponse == null) {
-                Log.e(TAG, "PPSE selection failed")
                 return@withContext CardReadResult.Error(CardReadError.PPSE_NOT_FOUND)
             }
 
@@ -55,11 +50,9 @@ class NfcCardReader {
                 }
             }
 
-            Log.e(TAG, "Could not read PAN from any application")
             return@withContext CardReadResult.Error(CardReadError.PAN_NOT_FOUND)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Card read error", e)
             return@withContext when {
                 e.message?.contains("Tag was lost") == true -> 
                     CardReadResult.Error(CardReadError.TAG_LOST)
@@ -69,11 +62,7 @@ class NfcCardReader {
                     CardReadResult.Error(CardReadError.UNKNOWN_ERROR, e.message)
             }
         } finally {
-            try {
-                isoDep.close()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error closing IsoDep", e)
-            }
+            runCatching { isoDep.close() }
         }
     }
 
@@ -82,10 +71,7 @@ class NfcCardReader {
      */
     private fun selectPpse(isoDep: IsoDep): ByteArray? {
         val command = EmvUtils.buildSelectPpseCommand()
-        Log.d(TAG, "SELECT PPSE: ${EmvUtils.toHexString(command)}")
-        
         val response = isoDep.transceive(command)
-        Log.d(TAG, "PPSE Response: ${EmvUtils.toHexString(response)}")
 
         return if (EmvUtils.isSuccessResponse(response)) {
             EmvUtils.getResponseData(response)
@@ -111,12 +97,9 @@ class NfcCardReader {
      * Try to read PAN using specific AID
      */
     private fun tryReadWithAid(isoDep: IsoDep, aid: ByteArray): CardReadResult {
-        Log.d(TAG, "Trying AID: ${EmvUtils.toHexString(aid)}")
-
         // Step 1: SELECT application
         val selectCommand = EmvUtils.buildSelectCommand(aid)
         val selectResponse = isoDep.transceive(selectCommand)
-        Log.d(TAG, "SELECT Response: ${EmvUtils.toHexString(selectResponse)}")
 
         if (!EmvUtils.isSuccessResponse(selectResponse)) {
             return CardReadResult.Error(CardReadError.AID_NOT_FOUND)
@@ -136,7 +119,6 @@ class NfcCardReader {
         
         // Try GPO with proper PDOL data
         var gpoResponse = tryGpoWithPdol(isoDep, pdol)
-        Log.d(TAG, "GPO Response: ${EmvUtils.toHexString(gpoResponse)}")
 
         var successfulGpoResponse: ByteArray? = null
         
@@ -144,17 +126,13 @@ class NfcCardReader {
             successfulGpoResponse = gpoResponse
         } else {
             // Try with empty PDOL
-            Log.d(TAG, "GPO failed with PDOL, trying empty PDOL")
             val gpoCommandEmpty = EmvUtils.buildGpoCommand(null)
-            Log.d(TAG, "GPO Command (empty): ${EmvUtils.toHexString(gpoCommandEmpty)}")
             val gpoResponseEmpty = isoDep.transceive(gpoCommandEmpty)
-            Log.d(TAG, "GPO Response (empty): ${EmvUtils.toHexString(gpoResponseEmpty)}")
             
             if (EmvUtils.isSuccessResponse(gpoResponseEmpty)) {
                 successfulGpoResponse = gpoResponseEmpty
             } else {
                 // GPO failed - try reading common record locations directly
-                Log.d(TAG, "GPO failed, attempting direct record read")
                 val directResult = tryDirectRecordRead(isoDep)
                 if (directResult is CardReadResult.Success) {
                     return directResult
@@ -177,7 +155,6 @@ class NfcCardReader {
 
         // Step 3: READ RECORDS based on AFL
         val aflEntries = TlvParser.extractAfl(gpoData)
-        Log.d(TAG, "AFL entries: ${aflEntries.size}")
 
         for (entry in aflEntries) {
             for (record in entry.firstRecord..entry.lastRecord) {
@@ -190,13 +167,12 @@ class NfcCardReader {
                         
                         TlvParser.extractPan(recordData)?.let { pan ->
                             if (CardValidator.isValidCardNumber(pan)) {
-                                Log.d(TAG, "PAN found in SFI ${entry.sfi}, Record $record")
                                 return createSuccessResult(pan)
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error reading record ${entry.sfi}/$record", e)
+                    // Continue with next record
                 }
             }
         }
@@ -343,11 +319,9 @@ class NfcCardReader {
         for ((index, ttq) in ttqVariants.withIndex()) {
             val pdolData = buildPdolDataWithTtq(pdol, ttq)
             val gpoCommand = EmvUtils.buildGpoCommand(pdolData)
-            Log.d(TAG, "GPO Command (TTQ variant $index): ${EmvUtils.toHexString(gpoCommand)}")
             
             try {
                 val response = isoDep.transceive(gpoCommand)
-                Log.d(TAG, "GPO Response (TTQ variant $index): ${EmvUtils.toHexString(response)}")
                 
                 if (EmvUtils.isSuccessResponse(response)) {
                     return response
@@ -364,7 +338,7 @@ class NfcCardReader {
                     return response
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "GPO attempt $index failed", e)
+                // Continue with next TTQ variant
             }
         }
         
@@ -409,8 +383,6 @@ class NfcCardReader {
      * Some cards allow reading without a successful GPO
      */
     private fun tryDirectRecordRead(isoDep: IsoDep): CardReadResult {
-        Log.d(TAG, "Attempting direct record read from common locations")
-        
         // Common SFI values where PAN is typically stored
         val commonLocations = listOf(
             Pair(1, 1..4),   // SFI 1, records 1-4
@@ -426,12 +398,10 @@ class NfcCardReader {
                     val readResponse = isoDep.transceive(readCommand)
                     
                     if (EmvUtils.isSuccessResponse(readResponse)) {
-                        Log.d(TAG, "Direct read success: SFI $sfi, Record $record")
                         val recordData = TlvParser.parse(EmvUtils.getResponseData(readResponse))
                         
                         TlvParser.extractPan(recordData)?.let { pan ->
                             if (CardValidator.isValidCardNumber(pan)) {
-                                Log.d(TAG, "PAN found via direct read: SFI $sfi, Record $record")
                                 return createSuccessResult(pan)
                             }
                         }

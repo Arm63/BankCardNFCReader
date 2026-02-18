@@ -2,7 +2,6 @@ package com.emvreader.nfc
 
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.SecureRandom
@@ -44,10 +43,6 @@ import java.util.Calendar
 class EmvCardReader(
     private val config: ReaderConfig = ReaderConfig()
 ) {
-    companion object {
-        private const val TAG = "EmvCardReader"
-    }
-    
     /**
      * Aggregated TLV data collected during card reading.
      * Used for payment source detection.
@@ -66,7 +61,6 @@ class EmvCardReader(
         val isoDep = IsoDep.get(tag)
         
         if (isoDep == null) {
-            Log.e(TAG, "IsoDep not supported on this card")
             return@withContext CardData.Error(
                 code = ErrorCode.UNSUPPORTED_CARD,
                 message = "This card type is not supported for contactless reading"
@@ -76,11 +70,9 @@ class EmvCardReader(
         try {
             isoDep.timeout = config.timeoutMs
             isoDep.connect()
-            Log.d(TAG, "Connected to card, max transceive: ${isoDep.maxTransceiveLength}")
 
             // Step 1: Select PPSE
             val ppseResponse = selectPpse(isoDep) ?: run {
-                Log.e(TAG, "PPSE selection failed")
                 return@withContext CardData.Error(
                     code = ErrorCode.PPSE_NOT_FOUND,
                     message = "Card does not support contactless reading"
@@ -100,14 +92,12 @@ class EmvCardReader(
                 }
             }
 
-            Log.e(TAG, "Could not read PAN from any application")
             return@withContext CardData.Error(
                 code = ErrorCode.PAN_NOT_FOUND,
                 message = "Could not read card number"
             )
 
         } catch (e: Exception) {
-            Log.e(TAG, "Card read error", e)
             return@withContext when {
                 e.message?.contains("Tag was lost") == true -> CardData.Error(
                     code = ErrorCode.TAG_LOST,
@@ -129,11 +119,7 @@ class EmvCardReader(
 
     private fun selectPpse(isoDep: IsoDep): ByteArray? {
         val command = ApduBuilder.selectPpse()
-        Log.d(TAG, "SELECT PPSE: ${command.toHex()}")
-        
         val response = isoDep.transceive(command)
-        Log.d(TAG, "PPSE Response: ${response.toHex()}")
-
         return if (response.isSuccess()) response.getData() else null
     }
 
@@ -145,11 +131,8 @@ class EmvCardReader(
     }
 
     private fun tryReadWithAid(isoDep: IsoDep, aid: ByteArray): CardData {
-        Log.d(TAG, "Trying AID: ${aid.toHex()}")
-
         // SELECT application
         val selectResponse = isoDep.transceive(ApduBuilder.select(aid))
-        Log.d(TAG, "SELECT Response: ${selectResponse.toHex()}")
 
         if (!selectResponse.isSuccess()) {
             return CardData.Error(ErrorCode.AID_NOT_FOUND, "Application not found")
@@ -166,16 +149,13 @@ class EmvCardReader(
         // GET PROCESSING OPTIONS with various TTQ values
         val pdol = TlvParser.extractPdol(selectData)
         var gpoResponse = tryGpoWithVariants(isoDep, pdol)
-        Log.d(TAG, "GPO Response: ${gpoResponse.toHex()}")
 
         if (!gpoResponse.isSuccess()) {
             // Try empty PDOL
-            Log.d(TAG, "GPO failed, trying empty PDOL")
             val emptyGpo = isoDep.transceive(ApduBuilder.gpo(null))
             
             if (!emptyGpo.isSuccess()) {
                 // Fallback: direct record read
-                Log.d(TAG, "GPO failed, attempting direct record read")
                 return tryDirectRecordRead(isoDep)
             }
             gpoResponse = emptyGpo
@@ -191,7 +171,6 @@ class EmvCardReader(
 
         // Read records from AFL
         val aflEntries = TlvParser.extractAfl(gpoData)
-        Log.d(TAG, "AFL entries: ${aflEntries.size}")
 
         for (entry in aflEntries) {
             for (record in entry.firstRecord..entry.lastRecord) {
@@ -206,13 +185,12 @@ class EmvCardReader(
                         
                         TlvParser.extractPan(recordData)?.let { pan ->
                             if (pan.isValidPan()) {
-                                Log.d(TAG, "PAN found in SFI ${entry.sfi}, Record $record")
                                 return createSuccess(pan)
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error reading record ${entry.sfi}/$record", e)
+                    // Continue trying other records
                 }
             }
         }
@@ -224,11 +202,9 @@ class EmvCardReader(
         for ((index, ttq) in EmvConstants.TTQ_VARIANTS.withIndex()) {
             val pdolData = buildPdolData(pdol, ttq)
             val command = ApduBuilder.gpo(pdolData)
-            Log.d(TAG, "GPO Command (variant $index): ${command.toHex()}")
             
             try {
                 val response = isoDep.transceive(command)
-                Log.d(TAG, "GPO Response (variant $index): ${response.toHex()}")
                 
                 if (response.isSuccess()) return response
                 
@@ -237,7 +213,7 @@ class EmvCardReader(
                     return response
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "GPO attempt $index failed", e)
+                // Continue with next variant
             }
         }
         
@@ -307,8 +283,6 @@ class EmvCardReader(
     }
 
     private fun tryDirectRecordRead(isoDep: IsoDep): CardData {
-        Log.d(TAG, "Attempting direct record read")
-        
         val locations = listOf(
             1 to (1..4), 2 to (1..4), 3 to (1..2), 4 to (1..2)
         )
@@ -323,7 +297,6 @@ class EmvCardReader(
                         
                         TlvParser.extractPan(recordData)?.let { pan ->
                             if (pan.isValidPan()) {
-                                Log.d(TAG, "PAN found via direct read: SFI $sfi, Record $record")
                                 return createSuccess(pan)
                             }
                         }
@@ -340,8 +313,6 @@ class EmvCardReader(
         
         // Detect payment source (physical card vs digital wallet)
         val detectionResult = CardSourceDetector.detect(collectedTlvData)
-        Log.d(TAG, "Payment source detected: ${detectionResult.source.displayName} " +
-                   "(confidence: ${detectionResult.confidence})")
         
         return CardData.Success(
             pan = pan,
