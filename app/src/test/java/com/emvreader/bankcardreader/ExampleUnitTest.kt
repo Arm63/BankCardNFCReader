@@ -1,4 +1,4 @@
-package com.example.bankcardreader
+package com.emvreader.bankcardreader
 
 import org.junit.Test
 

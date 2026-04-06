@@ -1,6 +1,6 @@
-package com.example.bankcardreader
+package com.emvreader.bankcardreader
 
-import com.example.bankcardreader.nfc.EmvUtils
+import com.emvreader.bankcardreader.nfc.EmvUtils
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -65,7 +65,7 @@ class EmvUtilsTest {
 
     @Test
     fun getResponseData_withStatusWords_returnsDataOnly() {
-        val response = byteArrayOf(0x6F, 0x10, 0x84, 0x07, 0x90.toByte(), 0x00)
+        val response = byteArrayOf(0x6F, 0x10, 0x84.toByte(), 0x07, 0x90.toByte(), 0x00)
         val data = EmvUtils.getResponseData(response)
         
         assertEquals(4, data.size)

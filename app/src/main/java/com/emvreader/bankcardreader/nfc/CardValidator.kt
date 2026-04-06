@@ -1,4 +1,4 @@
-package com.example.bankcardreader.nfc
+package com.emvreader.bankcardreader.nfc
 
 /**
  * Card number validation utilities.

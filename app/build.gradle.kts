@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.bankcardreader"
+    namespace = "com.emvreader.bankcardreader"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.bankcardreader"
+        applicationId = "com.emvreader.bankcardreader"
         minSdk = 27
         targetSdk = 36
         versionCode = 1

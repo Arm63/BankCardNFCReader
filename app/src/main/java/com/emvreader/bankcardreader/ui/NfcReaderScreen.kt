@@ -1,4 +1,4 @@
-package com.example.bankcardreader.ui
+package com.emvreader.bankcardreader.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -25,8 +25,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.bankcardreader.nfc.CardValidator
-import com.example.bankcardreader.nfc.NfcStatus
+import com.emvreader.bankcardreader.nfc.CardValidator
+import com.emvreader.bankcardreader.nfc.NfcStatus
 import com.emvreader.nfc.PaymentSource
 import com.emvreader.nfc.CardSourceDetector
 

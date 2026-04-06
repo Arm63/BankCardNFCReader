@@ -1,4 +1,4 @@
-package com.example.bankcardreader.nfc
+package com.emvreader.bankcardreader.nfc
 
 import android.nfc.Tag
 import android.nfc.tech.IsoDep

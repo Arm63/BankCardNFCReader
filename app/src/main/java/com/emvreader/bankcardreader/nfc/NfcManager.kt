@@ -1,4 +1,4 @@
-package com.example.bankcardreader.nfc
+package com.emvreader.bankcardreader.nfc
 
 import android.app.Activity
 import android.app.PendingIntent

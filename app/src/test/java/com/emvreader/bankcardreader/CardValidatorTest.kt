@@ -1,6 +1,6 @@
-package com.example.bankcardreader
+package com.emvreader.bankcardreader
 
-import com.example.bankcardreader.nfc.CardValidator
+import com.emvreader.bankcardreader.nfc.CardValidator
 import org.junit.Assert.*
 import org.junit.Test
 

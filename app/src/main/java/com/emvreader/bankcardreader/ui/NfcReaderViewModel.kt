@@ -1,9 +1,9 @@
-package com.example.bankcardreader.ui
+package com.emvreader.bankcardreader.ui
 
 import android.nfc.Tag
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.bankcardreader.nfc.*
+import com.emvreader.bankcardreader.nfc.*
 // Import library classes for payment source detection
 import com.emvreader.nfc.CardSourceDetector
 import com.emvreader.nfc.EmvCardReader

@@ -1,4 +1,4 @@
-package com.example.bankcardreader.ui.theme
+package com.emvreader.bankcardreader.ui.theme
 
 import android.app.Activity
 import android.os.Build

@@ -1,7 +1,7 @@
-package com.example.bankcardreader
+package com.emvreader.bankcardreader
 
-import com.example.bankcardreader.nfc.EmvUtils
-import com.example.bankcardreader.nfc.TlvParser
+import com.emvreader.bankcardreader.nfc.EmvUtils
+import com.emvreader.bankcardreader.nfc.TlvParser
 import org.junit.Assert.*
 import org.junit.Test
 

@@ -1,4 +1,4 @@
-package com.example.bankcardreader.nfc
+package com.emvreader.bankcardreader.nfc
 
 /**
  * TLV (Tag-Length-Value) parser for EMV data structures.

@@ -1,4 +1,4 @@
-package com.example.bankcardreader.nfc
+package com.emvreader.bankcardreader.nfc
 
 /**
  * EMV APDU commands and utilities for reading contactless payment cards.

@@ -1,4 +1,4 @@
-package com.example.bankcardreader
+package com.emvreader.bankcardreader
 
 import android.content.Intent
 import android.os.Bundle
@@ -16,11 +16,11 @@ import androidx.core.content.getSystemService
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.example.bankcardreader.nfc.NfcManager
-import com.example.bankcardreader.ui.NfcReaderScreen
-import com.example.bankcardreader.ui.NfcReaderUiState
-import com.example.bankcardreader.ui.NfcReaderViewModel
-import com.example.bankcardreader.ui.theme.BankCardReaderTheme
+import com.emvreader.bankcardreader.nfc.NfcManager
+import com.emvreader.bankcardreader.ui.NfcReaderScreen
+import com.emvreader.bankcardreader.ui.NfcReaderUiState
+import com.emvreader.bankcardreader.ui.NfcReaderViewModel
+import com.emvreader.bankcardreader.ui.theme.BankCardReaderTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
