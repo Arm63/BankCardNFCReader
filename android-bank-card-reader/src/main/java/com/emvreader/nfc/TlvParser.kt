@@ -34,6 +34,8 @@ object TlvParser {
     const val TAG_TRACK2_BITMAP = "9F65"
     /** Device Type - additional device identification */
     const val TAG_DEVICE_TYPE = "9F6D"
+    /** PIN Try Counter — offline PIN attempts remaining (often via GET DATA). */
+    const val TAG_PIN_TRY_COUNTER = "9F17"
 
     data class TlvData(val tag: String, val length: Int, val value: ByteArray)
 
@@ -205,6 +207,15 @@ object TlvParser {
     /** Application Identifier from tag `4F` (uppercase hex, no spaces). */
     fun extractAid(tlvMap: Map<String, TlvData>): String? =
         tlvMap[TAG_AID]?.value?.toHex()?.uppercase()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * PIN try counter from tag `9F17` (first byte, 0–255). Often absent on contactless.
+     */
+    fun extractPinTryCounter(tlvMap: Map<String, TlvData>): Int? {
+        val v = tlvMap[TAG_PIN_TRY_COUNTER]?.value ?: return null
+        if (v.isEmpty()) return null
+        return v[0].toInt() and 0xFF
+    }
 
     data class AflEntry(val sfi: Int, val firstRecord: Int, val lastRecord: Int)
 

@@ -133,6 +133,7 @@ class EmvCardReader(
                     emvLog(
                         "readCard: success last4=${result.pan.takeLast(4)} " +
                             "aid=${result.aid ?: "null"} " +
+                            "pinTries=${result.pinTriesRemaining ?: "null"} " +
                             "cardholderName=${result.cardholderName?.let { "\"$it\"" } ?: "null"}"
                     )
                     return@withContext result
@@ -286,7 +287,8 @@ class EmvCardReader(
         logCollectedTlv("after_extra_SFI_probe")
 
         mergeCardholderFromGetData(isoDep)
-        logCollectedTlv("after_GET_DATA_5F20")
+        mergePinTryCounterFromGetData(isoDep)
+        logCollectedTlv("after_GET_DATA_5F20_9F17")
 
         foundPan?.let {
             val name = TlvParser.extractCardholderName(collectedTlvData)
@@ -372,6 +374,37 @@ class EmvCardReader(
             }
         }
         emvLog("GET_DATA 5F20: exhausted; name still null")
+    }
+
+    /** GET DATA for tag 9F17 (PIN try counter); merges into [collectedTlvData] on success. */
+    private fun mergePinTryCounterFromGetData(isoDep: IsoDep) {
+        if (TlvParser.extractPinTryCounter(collectedTlvData) != null) {
+            emvLog("GET_DATA 9F17: skip (already in TLV map)")
+            return
+        }
+        for (cla in intArrayOf(0x80, 0x00)) {
+            try {
+                val cmd = ApduBuilder.getData(0x9F, 0x17, cla)
+                val resp = isoDep.transceive(cmd)
+                logApduResult("GET_DATA 9F17 CLA=${"%02X".format(cla)}", cmd, resp)
+                if (!resp.isSuccess()) {
+                    emvLog("GET_DATA 9F17 CLA=${"%02X".format(cla)} failed SW=${"%04X".format(resp.getStatusWord())}")
+                    continue
+                }
+                val data = resp.getData()
+                if (data.isEmpty()) continue
+                val parsed = TlvParser.parse(data)
+                emvLog("GET_DATA 9F17 parsed tags=${parsed.keys.sorted().joinToString(",")}")
+                collectedTlvData.putAll(parsed)
+                if (TlvParser.extractPinTryCounter(collectedTlvData) != null) {
+                    emvLog("GET_DATA 9F17: pin try counter=${TlvParser.extractPinTryCounter(collectedTlvData)}")
+                    return
+                }
+            } catch (e: Exception) {
+                emvLog("GET_DATA 9F17 CLA=${"%02X".format(cla)} exception=${e.message}")
+            }
+        }
+        emvLog("GET_DATA 9F17: exhausted or unsupported")
     }
 
     private fun tryGpoWithVariants(isoDep: IsoDep, pdol: ByteArray?): ByteArray {
@@ -497,6 +530,7 @@ class EmvCardReader(
         }
         logCollectedTlv("direct_after_scan")
         mergeCardholderFromGetData(isoDep)
+        mergePinTryCounterFromGetData(isoDep)
         logCollectedTlv("direct_after_GET_DATA")
         foundPan?.let {
             emvLog("tryDirectRecordRead success last4=${it.takeLast(4)} name=${TlvParser.extractCardholderName(collectedTlvData)}")
@@ -520,7 +554,8 @@ class EmvCardReader(
             paymentSource = detectionResult.source,
             sourceDetectionResult = detectionResult,
             cardholderName = TlvParser.extractCardholderName(collectedTlvData),
-            aid = TlvParser.extractAid(collectedTlvData)
+            aid = TlvParser.extractAid(collectedTlvData),
+            pinTriesRemaining = TlvParser.extractPinTryCounter(collectedTlvData)
         )
     }
 }

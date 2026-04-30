@@ -41,6 +41,7 @@ sealed class CardData {
      * @property sourceDetectionResult Detailed detection result with confidence and debug info
      * @property cardholderName Cardholder name from EMV tag 5F20 when present. Often **null** on contactless for privacy.
      * @property aid Selected payment application identifier (tag `4F`), uppercase hex without spaces.
+     * @property pinTriesRemaining Offline PIN tries left (tag `9F17`) when the card exposes it; often **null** on contactless.
      */
     data class Success(
         val pan: String,
@@ -50,7 +51,8 @@ sealed class CardData {
         val paymentSource: PaymentSource = PaymentSource.UNKNOWN,
         val sourceDetectionResult: CardSourceDetector.DetectionResult? = null,
         val cardholderName: String? = null,
-        val aid: String? = null
+        val aid: String? = null,
+        val pinTriesRemaining: Int? = null
     ) : CardData() {
 
         /**

@@ -123,6 +123,7 @@ fun NfcReaderScreen(
                                 maskedOwnerName = state.maskedOwnerName,
                                 aidDisplayName = state.aidDisplayName,
                                 aidHex = state.aidHex,
+                                pinTriesRemaining = state.pinTriesRemaining,
                                 onConfirm = { onConfirmCard(state.pan) },
                                 onReset = onReset
                             )
@@ -513,6 +514,7 @@ private fun SuccessContent(
     maskedOwnerName: String?,
     aidDisplayName: String?,
     aidHex: String?,
+    pinTriesRemaining: Int?,
     onConfirm: () -> Unit,
     onReset: () -> Unit
 ) {
@@ -644,6 +646,13 @@ private fun SuccessContent(
                     if (appLine != null) {
                         Text(
                             text = "App: $appLine",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF778DA9).copy(alpha = 0.9f)
+                        )
+                    }
+                    pinTriesRemaining?.let { n ->
+                        Text(
+                            text = "PIN tries left: $n",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF778DA9).copy(alpha = 0.9f)
                         )

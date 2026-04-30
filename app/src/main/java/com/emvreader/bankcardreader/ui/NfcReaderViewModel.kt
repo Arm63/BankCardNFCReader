@@ -96,7 +96,8 @@ class NfcReaderViewModel : ViewModel() {
                         detectionConfidence = result.sourceDetectionResult?.confidence,
                         maskedOwnerName = result.maskedOwnerName(),
                         aidHex = result.aid,
-                        aidDisplayName = result.aidDisplayName
+                        aidDisplayName = result.aidDisplayName,
+                        pinTriesRemaining = result.pinTriesRemaining
                     )
                 }
                 is CardData.Error -> {
@@ -217,6 +218,7 @@ sealed class NfcReaderUiState {
      * @property maskedOwnerName Masked cardholder from EMV when present (e.g. A**** M****); often null on contactless
      * @property aidHex EMV application id (tag 4F), uppercase hex; null if absent
      * @property aidDisplayName Friendly label from [com.emvreader.nfc.AidLabels] when known
+     * @property pinTriesRemaining Offline PIN tries remaining (9F17) when card exposes it; often null on contactless
      */
     data class Success(
         val pan: String,
@@ -227,7 +229,8 @@ sealed class NfcReaderUiState {
         val detectionConfidence: CardSourceDetector.DetectionConfidence? = null,
         val maskedOwnerName: String? = null,
         val aidHex: String? = null,
-        val aidDisplayName: String? = null
+        val aidDisplayName: String? = null,
+        val pinTriesRemaining: Int? = null
     ) : NfcReaderUiState()
     
     data class Error(
