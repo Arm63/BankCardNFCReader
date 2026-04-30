@@ -12,13 +12,8 @@
 **Read PAN from contactless EMV cards on Android in Kotlin.** BankCardNFCReader is a lightweight Android NFC credit card reader library that extracts the card number (PAN/DPAN), card type (Visa, Mastercard, Amex, Discover, UnionPay, JCB, Mir), cardholder name, AID, and detects Google Wallet, Apple Pay, Samsung Pay, Garmin Pay and Fitbit Pay vs a physical card — all via standard EMV tags over NFC.
 
 <p align="center">
-  <img src="docs/media/demo.gif" alt="Android NFC credit card reader library demo: scanning a contactless Visa card and showing masked PAN, cardholder name and Google Wallet detection" width="320" />
-</p>
-
-<p align="center">
-  <img src="docs/media/screenshot-physical-card.png" alt="Physical Visa card scanned via NFC on Android, showing masked PAN 4111 **** **** 1111 and AID Visa Credit/Debit" width="240" />
-  <img src="docs/media/screenshot-google-wallet.png" alt="Google Wallet token detected on Android via EMV tag 9F19 Token Requestor ID" width="240" />
-  <img src="docs/media/screenshot-pin-tries.png" alt="EMV tag 9F17 offline PIN tries remaining displayed on card UI" width="240" />
+  <img src="docs/media/physical-card-example.png" alt="Physical Visa card scanned via NFC on Android, showing masked PAN and AID Visa Credit/Debit" width="280" />
+  <img src="docs/media/apple-pay-example.png" alt="Apple Pay tokenized card detected on Android via EMV tag 9F19 Token Requestor ID" width="280" />
 </p>
 
 ## Table of Contents
