@@ -1,0 +1,100 @@
+name: Bug report
+description: Report a defect in BankCardNFCReader
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please do NOT include any real PAN, full card number, or cardholder personal data in this report.
+  - type: input
+    id: lib_version
+    attributes:
+      label: Library version
+      description: e.g. 1.1.4
+      placeholder: "1.1.4"
+    validations:
+      required: true
+  - type: input
+    id: android_version
+    attributes:
+      label: Android version
+      description: OS version of the device used to reproduce
+      placeholder: "Android 14 (API 34)"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device model
+      placeholder: "Pixel 7, Samsung Galaxy S23, ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: card_brand
+    attributes:
+      label: Card brand
+      options:
+        - Visa
+        - Mastercard
+        - American Express
+        - Discover
+        - UnionPay
+        - JCB
+        - Mir
+        - Other / unknown
+    validations:
+      required: true
+  - type: dropdown
+    id: payment_source
+    attributes:
+      label: Payment source
+      options:
+        - Physical plastic card
+        - Google Wallet
+        - Apple Pay
+        - Samsung Pay
+        - Garmin Pay
+        - Fitbit Pay
+        - Other digital wallet
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Numbered steps to reproduce. Do NOT paste real PAN values.
+      placeholder: |
+        1. Call EmvCardReader.readCard(tag)
+        2. Tap a Visa contactless card
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: Redact any PAN. Use ``` fenced code blocks ```.
+      render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have NOT included any real card number or cardholder PII in this report
+          required: true
+        - label: I have read the [Code of Conduct](../CODE_OF_CONDUCT.md)
+          required: true
