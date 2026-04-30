@@ -5,10 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.emvreader.bankcardreader.nfc.*
 // Import library classes for payment source detection
+import com.emvreader.bankcardreader.BuildConfig
 import com.emvreader.nfc.CardSourceDetector
 import com.emvreader.nfc.EmvCardReader
 import com.emvreader.nfc.CardData
 import com.emvreader.nfc.PaymentSource
+import com.emvreader.nfc.ReaderConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +25,7 @@ import kotlinx.coroutines.launch
 class NfcReaderViewModel : ViewModel() {
 
     // Use library's EmvCardReader for enhanced detection
-    private val libraryReader = EmvCardReader()
+    private val libraryReader = EmvCardReader(ReaderConfig(debugEmv = BuildConfig.DEBUG))
     
     // Keep existing reader for fallback
     private val cardReader = NfcCardReader()
@@ -91,7 +93,10 @@ class NfcReaderViewModel : ViewModel() {
                         cardType = mapCardType(result.cardType),
                         paymentSource = result.paymentSource,
                         isTokenizedWallet = result.isTokenizedWallet,
-                        detectionConfidence = result.sourceDetectionResult?.confidence
+                        detectionConfidence = result.sourceDetectionResult?.confidence,
+                        maskedOwnerName = result.maskedOwnerName(),
+                        aidHex = result.aid,
+                        aidDisplayName = result.aidDisplayName
                     )
                 }
                 is CardData.Error -> {
@@ -209,6 +214,9 @@ sealed class NfcReaderUiState {
      * @property paymentSource Source of the card (Physical, Google Wallet, Samsung Pay, etc.)
      * @property isTokenizedWallet True if card is from a digital wallet
      * @property detectionConfidence Confidence level of payment source detection
+     * @property maskedOwnerName Masked cardholder from EMV when present (e.g. A**** M****); often null on contactless
+     * @property aidHex EMV application id (tag 4F), uppercase hex; null if absent
+     * @property aidDisplayName Friendly label from [com.emvreader.nfc.AidLabels] when known
      */
     data class Success(
         val pan: String,
@@ -216,7 +224,10 @@ sealed class NfcReaderUiState {
         val cardType: CardValidator.CardType,
         val paymentSource: PaymentSource = PaymentSource.UNKNOWN,
         val isTokenizedWallet: Boolean = false,
-        val detectionConfidence: CardSourceDetector.DetectionConfidence? = null
+        val detectionConfidence: CardSourceDetector.DetectionConfidence? = null,
+        val maskedOwnerName: String? = null,
+        val aidHex: String? = null,
+        val aidDisplayName: String? = null
     ) : NfcReaderUiState()
     
     data class Error(

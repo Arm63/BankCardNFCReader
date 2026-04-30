@@ -10,6 +10,10 @@ object TlvParser {
     
     // Card identity tags
     const val TAG_PAN = "5A"
+    /** EMV: Cardholder Name (often LASTNAME/FIRSTNAME, space-padded). May be absent on contactless. */
+    const val TAG_CARDHOLDER_NAME = "5F20"
+    /** Track 1 Data — may hold ISO 7813-style ^SURNAME/FIRSTNAME^ between separators when 5F20 is absent */
+    const val TAG_TRACK1 = "56"
     const val TAG_TRACK2 = "57"
     const val TAG_AID = "4F"
     const val TAG_DF_NAME = "84"
@@ -53,7 +57,7 @@ object TlvParser {
                 result[tag] = TlvData(tag, length, value)
 
                 // Parse nested constructed tags
-                if (isConstructed(tag) && value.isNotEmpty()) {
+                if (isEmvConstructed(tag) && value.isNotEmpty()) {
                     result.putAll(parse(value))
                 }
             } catch (e: Exception) {
@@ -97,8 +101,19 @@ object TlvParser {
         }
     }
 
-    private fun isConstructed(tag: String): Boolean {
+    /**
+     * EMV multi-byte data object tags (5Fxx, 9Fxx) are primitive values even when BER-TLV
+     * bit 6 of the first byte would suggest "constructed".
+     */
+    internal fun isConstructedTagForEmv(tag: String): Boolean = isEmvConstructed(tag)
+
+    private fun isEmvConstructed(tag: String): Boolean {
         if (tag.isEmpty()) return false
+        if (tag.length >= 4 &&
+            (tag.startsWith("5F", ignoreCase = true) || tag.startsWith("9F", ignoreCase = true))
+        ) {
+            return false
+        }
         val first = tag.substring(0, 2).toIntOrNull(16) ?: return false
         return (first and 0x20) != 0
     }
@@ -107,6 +122,36 @@ object TlvParser {
         tlvMap[TAG_PAN]?.let { return decodeBcd(it.value) }
         tlvMap[TAG_TRACK2]?.let { return extractPanFromTrack2(it.value) }
         return null
+    }
+
+    fun extractCardholderName(tlvMap: Map<String, TlvData>): String? {
+        tlvMap[TAG_CARDHOLDER_NAME]?.value?.let { v ->
+            meaningfulCardholderField(String(v, Charsets.ISO_8859_1))?.let { return it }
+        }
+        tlvMap[TAG_TRACK1]?.value?.let { parseCardholderFromTrack1(it) }?.let { return it }
+        return null
+    }
+
+    /**
+     * Contactless often returns tag 5F20 as a placeholder (e.g. two bytes `20 2F` → `" /"`) with no letters.
+     * Treat those like missing data so callers can fall back to Track 1 or GET DATA.
+     */
+    internal fun meaningfulCardholderField(raw: String): String? {
+        val t = raw.trim()
+        if (t.isEmpty()) return null
+        if (!t.any { it.isLetter() }) return null
+        return t
+    }
+
+    private fun parseCardholderFromTrack1(bytes: ByteArray): String? {
+        val s = String(bytes, Charsets.US_ASCII).trim { it <= ' ' || it == '%' }
+        if (s.isEmpty()) return null
+        val parts = s.split('^')
+        if (parts.size < 2) return null
+        val nameField = parts[1].trim()
+        if (nameField.isEmpty()) return null
+        if (!nameField.any { it.isLetter() }) return null
+        return nameField
     }
 
     private fun decodeBcd(data: ByteArray): String {
@@ -156,6 +201,10 @@ object TlvParser {
     }
 
     fun extractPdol(tlvMap: Map<String, TlvData>): ByteArray? = tlvMap[TAG_PDOL]?.value
+
+    /** Application Identifier from tag `4F` (uppercase hex, no spaces). */
+    fun extractAid(tlvMap: Map<String, TlvData>): String? =
+        tlvMap[TAG_AID]?.value?.toHex()?.uppercase()?.takeIf { it.isNotEmpty() }
 
     data class AflEntry(val sfi: Int, val firstRecord: Int, val lastRecord: Int)
 

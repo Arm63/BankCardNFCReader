@@ -1,6 +1,31 @@
 package com.emvreader.nfc
 
 /**
+ * Human-readable labels for common RID + AID prefixes (hex, uppercase).
+ */
+object AidLabels {
+    /** Short name for display, or **null** if unknown. */
+    fun displayName(aidHex: String): String? {
+        val a = aidHex.uppercase()
+        return when {
+            a.startsWith("A0000000031010") ||
+                a.startsWith("A0000000032010") -> "Visa Credit/Debit"
+            a.startsWith("A000000003") -> "Visa"
+            a.startsWith("A0000000041010") ||
+                a.startsWith("A0000000043060") ||
+                a.startsWith("A0000000043010") -> "Mastercard"
+            a.startsWith("A000000004") -> "Mastercard"
+            a.startsWith("A000000025") -> "American Express"
+            a.startsWith("A0000001523010") -> "Discover"
+            a.startsWith("A000000333") -> "UnionPay"
+            a.startsWith("A0000000651010") -> "JCB"
+            a.startsWith("A0000006581010") -> "Mir"
+            else -> null
+        }
+    }
+}
+
+/**
  * Result of card reading operation
  */
 sealed class CardData {
@@ -14,6 +39,8 @@ sealed class CardData {
      * @property cardType Detected card brand (Visa, Mastercard, etc.)
      * @property paymentSource Source of the payment (physical card, Google Wallet, Samsung Pay, etc.)
      * @property sourceDetectionResult Detailed detection result with confidence and debug info
+     * @property cardholderName Cardholder name from EMV tag 5F20 when present. Often **null** on contactless for privacy.
+     * @property aid Selected payment application identifier (tag `4F`), uppercase hex without spaces.
      */
     data class Success(
         val pan: String,
@@ -21,9 +48,17 @@ sealed class CardData {
         val maskedPan: String,
         val cardType: CardType,
         val paymentSource: PaymentSource = PaymentSource.UNKNOWN,
-        val sourceDetectionResult: CardSourceDetector.DetectionResult? = null
+        val sourceDetectionResult: CardSourceDetector.DetectionResult? = null,
+        val cardholderName: String? = null,
+        val aid: String? = null
     ) : CardData() {
-        
+
+        /**
+         * Friendly name for [aid] from [AidLabels], or **null** if unknown.
+         */
+        val aidDisplayName: String?
+            get() = aid?.let { AidLabels.displayName(it) }
+
         /**
          * Whether the card data came from a digital wallet (Google Wallet, Samsung Pay, etc.)
          */
@@ -35,6 +70,19 @@ sealed class CardData {
          */
         val isPhysicalCard: Boolean
             get() = paymentSource.isPhysicalCard
+
+        /**
+         * Masked owner name for display (e.g. `A**** M****`). **null** if [cardholderName] is missing or blank.
+         */
+        fun maskedOwnerName(): String? {
+            val raw = cardholderName?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            val parts = raw.split(Regex("[\\s/]+")).filter { it.isNotEmpty() }
+            if (parts.isEmpty()) return null
+            return parts.joinToString(" ") { token ->
+                val c = token.firstOrNull { !it.isWhitespace() } ?: return@joinToString ""
+                "${c.uppercaseChar()}****"
+            }.trim().takeIf { it.isNotEmpty() }
+        }
     }
 
     /**

@@ -63,7 +63,7 @@ fun NfcReaderScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(48.dp))
-            
+
             // Header
             Text(
                 text = "Card Scanner",
@@ -73,9 +73,9 @@ fun NfcReaderScreen(
                 ),
                 color = Color(0xFFE0E1DD)
             )
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Text(
                 text = "Scan your card to auto-fill details",
                 style = MaterialTheme.typography.bodyMedium,
@@ -120,6 +120,9 @@ fun NfcReaderScreen(
                                 paymentSource = state.paymentSource,
                                 isTokenizedWallet = state.isTokenizedWallet,
                                 detectionConfidence = state.detectionConfidence,
+                                maskedOwnerName = state.maskedOwnerName,
+                                aidDisplayName = state.aidDisplayName,
+                                aidHex = state.aidHex,
                                 onConfirm = { onConfirmCard(state.pan) },
                                 onReset = onReset
                             )
@@ -507,6 +510,9 @@ private fun SuccessContent(
     paymentSource: PaymentSource,
     isTokenizedWallet: Boolean,
     detectionConfidence: CardSourceDetector.DetectionConfidence?,
+    maskedOwnerName: String?,
+    aidDisplayName: String?,
+    aidHex: String?,
     onConfirm: () -> Unit,
     onReset: () -> Unit
 ) {
@@ -570,7 +576,7 @@ private fun SuccessContent(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp),
+                .height(260.dp),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(
                 containerColor = Color(0xFF1B263B)
@@ -633,16 +639,38 @@ private fun SuccessContent(
                             color = Color(0xFF4CC9F0)
                         )
                     }
-                    
-                    // Middle: PAN
-                    Text(
-                        text = formattedPan,
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 2.sp
-                        ),
-                        color = Color(0xFFE0E1DD)
-                    )
+                    val appLine = aidDisplayName
+                        ?: aidHex?.let { h -> "AID ${h.take(18)}${if (h.length > 18) "…" else ""}" }
+                    if (appLine != null) {
+                        Text(
+                            text = "App: $appLine",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF778DA9).copy(alpha = 0.9f)
+                        )
+                    }
+
+                    // Middle: PAN and optional masked cardholder
+                    Column {
+                        Text(
+                            text = formattedPan,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 2.sp
+                            ),
+                            color = Color(0xFFE0E1DD)
+                        )
+                        if (!maskedOwnerName.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = maskedOwnerName,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    letterSpacing = 0.5.sp
+                                ),
+                                color = Color(0xFF778DA9)
+                            )
+                        }
+                    }
                     
                     // Bottom row: Tokenized indicator + Confidence
                     Row(
@@ -665,12 +693,14 @@ private fun SuccessContent(
                                     color = Color(0xFF4CC9F0)
                                 )
                             }
-                        } else {
+                        } else if (maskedOwnerName.isNullOrBlank()) {
                             Text(
-                                text = "Physical Card",
+                                text = "Cardholder name not on chip",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF778DA9)
+                                color = Color(0xFF778DA9).copy(alpha = 0.85f)
                             )
+                        } else {
+                            Spacer(modifier = Modifier.width(1.dp))
                         }
                         
                         // Detection confidence indicator

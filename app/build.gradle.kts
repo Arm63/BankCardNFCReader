@@ -36,11 +36,14 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
 dependencies {
-    // Library module for NFC card reading with payment source detection
+    // Local module: app always compiles against android-bank-card-reader sources in this repo.
+    // If you use a Maven/JitPack coordinate here instead, Android Studio runs against a cached
+    // remote AAR and changes under android-bank-card-reader/ will not appear until you publish.
     implementation(project(":android-bank-card-reader"))
     
     implementation(libs.androidx.core.ktx)

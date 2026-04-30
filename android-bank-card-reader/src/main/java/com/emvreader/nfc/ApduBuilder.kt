@@ -45,6 +45,18 @@ internal object ApduBuilder {
     }
 
     /**
+     * GET DATA — retrieve a BER-TLV data object (e.g. cardholder name 5F20).
+     * EMV Book 3: CLA 0x80; some cards accept CLA 0x00 — try both at call site if needed.
+     */
+    fun getData(tagHighByte: Int, tagLowByte: Int, cla: Int = 0x80): ByteArray = byteArrayOf(
+        (cla and 0xFF).toByte(),
+        0xCA.toByte(),
+        (tagHighByte and 0xFF).toByte(),
+        (tagLowByte and 0xFF).toByte(),
+        0x00
+    )
+
+    /**
      * READ RECORD command
      */
     fun readRecord(recordNumber: Int, sfi: Int): ByteArray = byteArrayOf(
