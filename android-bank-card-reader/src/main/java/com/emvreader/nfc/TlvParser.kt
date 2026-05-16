@@ -36,6 +36,8 @@ object TlvParser {
     const val TAG_DEVICE_TYPE = "9F6D"
     /** PIN Try Counter — offline PIN attempts remaining (often via GET DATA). */
     const val TAG_PIN_TRY_COUNTER = "9F17"
+    /** Application Expiration Date — YYMMDD BCD (3 bytes). */
+    const val TAG_EXPIRY = "5F24"
 
     data class TlvData(val tag: String, val length: Int, val value: ByteArray)
 
@@ -215,6 +217,23 @@ object TlvParser {
         val v = tlvMap[TAG_PIN_TRY_COUNTER]?.value ?: return null
         if (v.isEmpty()) return null
         return v[0].toInt() and 0xFF
+    }
+
+    /**
+     * Expiry from tag `5F24` (YYMMDD BCD, 3 bytes). Returns null if tag missing,
+     * malformed, or month outside 1..12.
+     *
+     * Two-digit year mapped to 2000–2099 (EMV cards use 4-digit Gregorian year minus century).
+     */
+    fun extractExpiry(tlvMap: Map<String, TlvData>): ExpiryDate? {
+        val v = tlvMap[TAG_EXPIRY]?.value ?: return null
+        if (v.size < 3) return null
+        val digits = decodeBcd(v)
+        if (digits.length < 4) return null
+        val yy = digits.substring(0, 2).toIntOrNull() ?: return null
+        val mm = digits.substring(2, 4).toIntOrNull() ?: return null
+        if (mm !in 1..12) return null
+        return ExpiryDate(year = 2000 + yy, month = mm)
     }
 
     data class AflEntry(val sfi: Int, val firstRecord: Int, val lastRecord: Int)

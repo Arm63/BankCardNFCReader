@@ -76,6 +76,13 @@ class EmvCardReader(
         collectedTlvData[TlvParser.TAG_TRACK1]?.value?.let { v ->
             emvLog("[$phase] 56 Track1 len=${v.size} hex=${v.toHex().hexPreview()}")
         }
+        collectedTlvData[TlvParser.TAG_EXPIRY]?.value?.let { v ->
+            val parsed = TlvParser.extractExpiry(collectedTlvData)
+            emvLog(
+                "[$phase] 5F24 raw len=${v.size} hex=${v.toHex().hexPreview()} " +
+                    "parsed=${parsed?.let { "${it.year}-${"%02d".format(it.month)}" } ?: "null"}"
+            )
+        }
     }
 
     private fun logApduResult(label: String, command: ByteArray, response: ByteArray) {
@@ -130,10 +137,14 @@ class EmvCardReader(
                 emvLog("try AID=${aid.toHex()}")
                 val result = tryReadWithAid(isoDep, aid)
                 if (result is CardData.Success) {
+                    val expStr = result.expiryDate?.let {
+                        "${it.displayMmYy()} expired=${it.isExpired()}"
+                    } ?: "null"
                     emvLog(
                         "readCard: success last4=${result.pan.takeLast(4)} " +
                             "aid=${result.aid ?: "null"} " +
                             "pinTries=${result.pinTriesRemaining ?: "null"} " +
+                            "expiry=$expStr " +
                             "cardholderName=${result.cardholderName?.let { "\"$it\"" } ?: "null"}"
                     )
                     return@withContext result
@@ -288,7 +299,8 @@ class EmvCardReader(
 
         mergeCardholderFromGetData(isoDep)
         mergePinTryCounterFromGetData(isoDep)
-        logCollectedTlv("after_GET_DATA_5F20_9F17")
+        mergeExpiryFromGetData(isoDep)
+        logCollectedTlv("after_GET_DATA_5F20_9F17_5F24")
 
         foundPan?.let {
             val name = TlvParser.extractCardholderName(collectedTlvData)
@@ -405,6 +417,34 @@ class EmvCardReader(
             }
         }
         emvLog("GET_DATA 9F17: exhausted or unsupported")
+    }
+
+    /** GET DATA for tag 5F24 (expiry); merges into [collectedTlvData] on success. */
+    private fun mergeExpiryFromGetData(isoDep: IsoDep) {
+        if (TlvParser.extractExpiry(collectedTlvData) != null) {
+            emvLog("GET_DATA 5F24: skip (already in TLV map)")
+            return
+        }
+        for (cla in intArrayOf(0x80, 0x00)) {
+            try {
+                val cmd = ApduBuilder.getData(0x5F, 0x24, cla)
+                val resp = isoDep.transceive(cmd)
+                logApduResult("GET_DATA 5F24 CLA=${"%02X".format(cla)}", cmd, resp)
+                if (!resp.isSuccess()) continue
+                val data = resp.getData()
+                if (data.isEmpty()) continue
+                val parsed = TlvParser.parse(data)
+                emvLog("GET_DATA 5F24 parsed tags=${parsed.keys.sorted().joinToString(",")}")
+                collectedTlvData.putAll(parsed)
+                if (TlvParser.extractExpiry(collectedTlvData) != null) {
+                    emvLog("GET_DATA 5F24: expiry=${TlvParser.extractExpiry(collectedTlvData)}")
+                    return
+                }
+            } catch (e: Exception) {
+                emvLog("GET_DATA 5F24 CLA=${"%02X".format(cla)} exception=${e.message}")
+            }
+        }
+        emvLog("GET_DATA 5F24: exhausted or unsupported")
     }
 
     private fun tryGpoWithVariants(isoDep: IsoDep, pdol: ByteArray?): ByteArray {
@@ -531,6 +571,7 @@ class EmvCardReader(
         logCollectedTlv("direct_after_scan")
         mergeCardholderFromGetData(isoDep)
         mergePinTryCounterFromGetData(isoDep)
+        mergeExpiryFromGetData(isoDep)
         logCollectedTlv("direct_after_GET_DATA")
         foundPan?.let {
             emvLog("tryDirectRecordRead success last4=${it.takeLast(4)} name=${TlvParser.extractCardholderName(collectedTlvData)}")
@@ -555,7 +596,8 @@ class EmvCardReader(
             sourceDetectionResult = detectionResult,
             cardholderName = TlvParser.extractCardholderName(collectedTlvData),
             aid = TlvParser.extractAid(collectedTlvData),
-            pinTriesRemaining = TlvParser.extractPinTryCounter(collectedTlvData)
+            pinTriesRemaining = TlvParser.extractPinTryCounter(collectedTlvData),
+            expiryDate = TlvParser.extractExpiry(collectedTlvData)
         )
     }
 }

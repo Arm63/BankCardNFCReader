@@ -1,5 +1,31 @@
 package com.emvreader.nfc
 
+import java.util.Calendar
+
+/**
+ * Card application expiration date from EMV tag `5F24`.
+ *
+ * @property year Four-digit Gregorian year (e.g. 2027).
+ * @property month Month, 1..12.
+ */
+data class ExpiryDate(val year: Int, val month: Int) {
+    /** Display as `MM/YY` (e.g. `12/27`). */
+    fun displayMmYy(): String = "%02d/%02d".format(month, year % 100)
+
+    /** Display as `MM/YYYY` (e.g. `12/2027`). */
+    fun displayMmYyyy(): String = "%02d/%04d".format(month, year)
+
+    /**
+     * True if [now] is after the expiry month. EMV cards expire at end of the printed month,
+     * so a card with expiry `12/2025` is valid through 2025-12-31.
+     */
+    fun isExpired(now: Calendar = Calendar.getInstance()): Boolean {
+        val nowYear = now.get(Calendar.YEAR)
+        val nowMonth = now.get(Calendar.MONTH) + 1
+        return nowYear > year || (nowYear == year && nowMonth > month)
+    }
+}
+
 /**
  * Human-readable labels for common RID + AID prefixes (hex, uppercase).
  */
@@ -42,6 +68,7 @@ sealed class CardData {
      * @property cardholderName Cardholder name from EMV tag 5F20 when present. Often **null** on contactless for privacy.
      * @property aid Selected payment application identifier (tag `4F`), uppercase hex without spaces.
      * @property pinTriesRemaining Offline PIN tries left (tag `9F17`) when the card exposes it; often **null** on contactless.
+     * @property expiryDate Application expiration date from tag `5F24` (`MM/YY`). **null** when card omits it.
      */
     data class Success(
         val pan: String,
@@ -52,7 +79,8 @@ sealed class CardData {
         val sourceDetectionResult: CardSourceDetector.DetectionResult? = null,
         val cardholderName: String? = null,
         val aid: String? = null,
-        val pinTriesRemaining: Int? = null
+        val pinTriesRemaining: Int? = null,
+        val expiryDate: ExpiryDate? = null
     ) : CardData() {
 
         /**

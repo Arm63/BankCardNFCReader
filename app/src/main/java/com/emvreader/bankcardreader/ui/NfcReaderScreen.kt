@@ -124,6 +124,7 @@ fun NfcReaderScreen(
                                 aidDisplayName = state.aidDisplayName,
                                 aidHex = state.aidHex,
                                 pinTriesRemaining = state.pinTriesRemaining,
+                                expiryDate = state.expiryDate,
                                 onConfirm = { onConfirmCard(state.pan) },
                                 onReset = onReset
                             )
@@ -515,6 +516,7 @@ private fun SuccessContent(
     aidDisplayName: String?,
     aidHex: String?,
     pinTriesRemaining: Int?,
+    expiryDate: com.emvreader.nfc.ExpiryDate?,
     onConfirm: () -> Unit,
     onReset: () -> Unit
 ) {
@@ -655,6 +657,16 @@ private fun SuccessContent(
                             text = "PIN tries left: $n",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF778DA9).copy(alpha = 0.9f)
+                        )
+                    }
+                    expiryDate?.let { exp ->
+                        val expired = exp.isExpired()
+                        Text(
+                            text = if (expired) "Expired: ${exp.displayMmYy()}" else "Expires: ${exp.displayMmYy()}",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = if (expired) FontWeight.Bold else FontWeight.Normal
+                            ),
+                            color = if (expired) Color(0xFFE63946) else Color(0xFF778DA9).copy(alpha = 0.9f)
                         )
                     }
 
