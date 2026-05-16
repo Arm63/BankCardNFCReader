@@ -135,10 +135,11 @@ Tests cover:
 ## Known Limitations
 
 1. **Some cards don't expose PAN via NFC** - security feature on some issuers
-2. **CVV/expiry not readable** - intentionally excluded for security
-3. **Cardholder name often unavailable** via contactless
-4. **Virtual cards** (Google Pay, Apple Pay) - different protocol
-5. **Chip-only cards** - no contactless antenna
+2. **CVV not readable** - not present in contactless EMV response
+3. **Expiry (`5F24`)** - exposed by most physical cards; many wallets strip it
+4. **Cardholder name often unavailable** via contactless
+5. **Virtual cards** (Google Pay, Apple Pay) - different protocol
+6. **Chip-only cards** - no contactless antenna
 
 ## Security Notes
 

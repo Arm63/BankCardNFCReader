@@ -25,10 +25,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.tooling.preview.Preview
 import com.emvreader.bankcardreader.nfc.CardValidator
 import com.emvreader.bankcardreader.nfc.NfcStatus
-import com.emvreader.nfc.PaymentSource
+import com.emvreader.bankcardreader.ui.theme.BankCardReaderTheme
 import com.emvreader.nfc.CardSourceDetector
+import com.emvreader.nfc.ExpiryDate
+import com.emvreader.nfc.PaymentSource
 
 @Composable
 fun NfcReaderScreen(
@@ -124,6 +127,7 @@ fun NfcReaderScreen(
                                 aidDisplayName = state.aidDisplayName,
                                 aidHex = state.aidHex,
                                 pinTriesRemaining = state.pinTriesRemaining,
+                                expiryDate = state.expiryDate,
                                 onConfirm = { onConfirmCard(state.pan) },
                                 onReset = onReset
                             )
@@ -515,6 +519,7 @@ private fun SuccessContent(
     aidDisplayName: String?,
     aidHex: String?,
     pinTriesRemaining: Int?,
+    expiryDate: com.emvreader.nfc.ExpiryDate?,
     onConfirm: () -> Unit,
     onReset: () -> Unit
 ) {
@@ -655,6 +660,16 @@ private fun SuccessContent(
                             text = "PIN tries left: $n",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF778DA9).copy(alpha = 0.9f)
+                        )
+                    }
+                    expiryDate?.let { exp ->
+                        val expired = exp.isExpired()
+                        Text(
+                            text = if (expired) "Expired: ${exp.displayMmYy()}" else "Expires: ${exp.displayMmYy()}",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = if (expired) FontWeight.Bold else FontWeight.Normal
+                            ),
+                            color = if (expired) Color(0xFFE63946) else Color(0xFF778DA9).copy(alpha = 0.9f)
                         )
                     }
 
@@ -984,4 +999,167 @@ private fun NfcNotAvailableContent(
 // Extension for NfcOff icon (not in default icons)
 private val Icons.NfcOff: ImageVector
     get() = Icons.Outlined.WifiOff // Using WifiOff as placeholder, replace with actual NfcOff if available
+
+// region Compose previews
+
+@Composable
+private fun PreviewSurface(content: @Composable () -> Unit) {
+    BankCardReaderTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0D1B2A),
+                            Color(0xFF1B263B),
+                            Color(0xFF415A77)
+                        )
+                    )
+                )
+                .padding(24.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+@Preview(name = "Idle — NFC enabled", showBackground = true, backgroundColor = 0xFF0D1B2A)
+@Composable
+private fun PreviewIdleEnabled() = PreviewSurface {
+    IdleContent(
+        nfcStatus = NfcStatus.ENABLED,
+        cardNumber = "",
+        onStartScan = {},
+        onCardNumberChange = {},
+        onConfirmCard = {}
+    )
+}
+
+@Preview(name = "Idle — NFC disabled", showBackground = true, backgroundColor = 0xFF0D1B2A)
+@Composable
+private fun PreviewIdleDisabled() = PreviewSurface {
+    IdleContent(
+        nfcStatus = NfcStatus.DISABLED,
+        cardNumber = "",
+        onStartScan = {},
+        onCardNumberChange = {},
+        onConfirmCard = {}
+    )
+}
+
+@Preview(name = "Scanning", showBackground = true, backgroundColor = 0xFF0D1B2A)
+@Composable
+private fun PreviewScanning() = PreviewSurface { ScanningContent(onStopScan = {}) }
+
+@Preview(name = "Reading", showBackground = true, backgroundColor = 0xFF0D1B2A)
+@Composable
+private fun PreviewReading() = PreviewSurface { ReadingContent() }
+
+@Preview(name = "Success — physical Visa, valid", showBackground = true, backgroundColor = 0xFF0D1B2A, heightDp = 900)
+@Composable
+private fun PreviewSuccessPhysicalValid() = PreviewSurface {
+    SuccessContent(
+        formattedPan = "4111 **** **** 1111",
+        cardType = CardValidator.CardType.VISA,
+        paymentSource = PaymentSource.PHYSICAL_CARD,
+        isTokenizedWallet = false,
+        detectionConfidence = CardSourceDetector.DetectionConfidence.HIGH,
+        maskedOwnerName = "A**** A****",
+        aidDisplayName = "Visa Credit/Debit",
+        aidHex = "A0000000031010",
+        pinTriesRemaining = 3,
+        expiryDate = ExpiryDate(2029, 12),
+        onConfirm = {},
+        onReset = {}
+    )
+}
+
+@Preview(name = "Success — physical Visa, EXPIRED", showBackground = true, backgroundColor = 0xFF0D1B2A, heightDp = 900)
+@Composable
+private fun PreviewSuccessPhysicalExpired() = PreviewSurface {
+    SuccessContent(
+        formattedPan = "4111 **** **** 1111",
+        cardType = CardValidator.CardType.VISA,
+        paymentSource = PaymentSource.PHYSICAL_CARD,
+        isTokenizedWallet = false,
+        detectionConfidence = CardSourceDetector.DetectionConfidence.HIGH,
+        maskedOwnerName = "A**** A****",
+        aidDisplayName = "Visa Credit/Debit",
+        aidHex = "A0000000031010",
+        pinTriesRemaining = 2,
+        expiryDate = ExpiryDate(2024, 4),
+        onConfirm = {},
+        onReset = {}
+    )
+}
+
+@Preview(name = "Success — Google Wallet (DPAN)", showBackground = true, backgroundColor = 0xFF0D1B2A, heightDp = 900)
+@Composable
+private fun PreviewSuccessGoogleWallet() = PreviewSurface {
+    SuccessContent(
+        formattedPan = "5200 8282 8282 8210",
+        cardType = CardValidator.CardType.MASTERCARD,
+        paymentSource = PaymentSource.GOOGLE_WALLET,
+        isTokenizedWallet = true,
+        detectionConfidence = CardSourceDetector.DetectionConfidence.HIGH,
+        maskedOwnerName = null,
+        aidDisplayName = "Mastercard",
+        aidHex = "A0000000041010",
+        pinTriesRemaining = null,
+        expiryDate = null,
+        onConfirm = {},
+        onReset = {}
+    )
+}
+
+@Preview(name = "Success — minimal (no name / no expiry)", showBackground = true, backgroundColor = 0xFF0D1B2A, heightDp = 900)
+@Composable
+private fun PreviewSuccessMinimal() = PreviewSurface {
+    SuccessContent(
+        formattedPan = "6011 0000 0000 0004",
+        cardType = CardValidator.CardType.DISCOVER,
+        paymentSource = PaymentSource.PHYSICAL_CARD,
+        isTokenizedWallet = false,
+        detectionConfidence = CardSourceDetector.DetectionConfidence.MEDIUM,
+        maskedOwnerName = null,
+        aidDisplayName = null,
+        aidHex = null,
+        pinTriesRemaining = null,
+        expiryDate = null,
+        onConfirm = {},
+        onReset = {}
+    )
+}
+
+@Preview(name = "Error — tag lost", showBackground = true, backgroundColor = 0xFF0D1B2A, heightDp = 700)
+@Composable
+private fun PreviewErrorTagLost() = PreviewSurface {
+    ErrorContent(
+        message = "Card was removed too quickly. Please hold steady.",
+        onRetry = {},
+        onManualEntry = {}
+    )
+}
+
+@Preview(name = "NFC disabled", showBackground = true, backgroundColor = 0xFF0D1B2A, heightDp = 700)
+@Composable
+private fun PreviewNfcDisabled() = PreviewSurface { NfcDisabledContent(onOpenSettings = {}) }
+
+@Preview(name = "NFC not available", showBackground = true, backgroundColor = 0xFF0D1B2A, heightDp = 700)
+@Composable
+private fun PreviewNfcNotAvailable() = PreviewSurface {
+    NfcNotAvailableContent(
+        cardNumber = "",
+        onCardNumberChange = {},
+        onConfirmCard = {}
+    )
+}
+
+// endregion
 

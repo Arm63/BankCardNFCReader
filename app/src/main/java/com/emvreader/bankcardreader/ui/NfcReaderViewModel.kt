@@ -97,7 +97,8 @@ class NfcReaderViewModel : ViewModel() {
                         maskedOwnerName = result.maskedOwnerName(),
                         aidHex = result.aid,
                         aidDisplayName = result.aidDisplayName,
-                        pinTriesRemaining = result.pinTriesRemaining
+                        pinTriesRemaining = result.pinTriesRemaining,
+                        expiryDate = result.expiryDate
                     )
                 }
                 is CardData.Error -> {
@@ -230,7 +231,8 @@ sealed class NfcReaderUiState {
         val maskedOwnerName: String? = null,
         val aidHex: String? = null,
         val aidDisplayName: String? = null,
-        val pinTriesRemaining: Int? = null
+        val pinTriesRemaining: Int? = null,
+        val expiryDate: com.emvreader.nfc.ExpiryDate? = null
     ) : NfcReaderUiState()
     
     data class Error(

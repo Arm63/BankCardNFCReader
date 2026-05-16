@@ -52,7 +52,7 @@ afterEvaluate {
                 
                 groupId = "com.github.Arm63"
                 artifactId = "BankCardNFCReader"
-                version = "1.1.4"
+                version = "1.1.5"
                 
                 pom {
                     name.set("Bank Card NFC Reader")

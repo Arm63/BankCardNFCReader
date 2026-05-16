@@ -45,6 +45,7 @@
 - **Cardholder name** from EMV tag `5F20` (when exposed)
 - **AID + friendly name** via `AidLabels` (Visa Credit/Debit, Mastercard, Amex, …)
 - **Offline PIN tries remaining** via tag `9F17`
+- **Card expiry (`5F24`)** with `isExpired()` helper and `MM/YY` / `MM/YYYY` display
 - **Multi-brand**: Visa, Mastercard, American Express, Discover, UnionPay, JCB, Mir
 - **Payment Source Detection**: physical card vs Google Wallet, Apple Pay, Samsung Pay, Garmin Pay, Fitbit Pay
 - **Form Factor (`9F6E`) + Token Requestor ID (`9F19`) parsing** for wallet identification
@@ -98,11 +99,11 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Arm63:BankCardNFCReader:1.1.4")
+    implementation("com.github.Arm63:BankCardNFCReader:1.1.5")
 }
 ```
 
-> Latest version is shown on the JitPack badge above. Replace `1.1.4` if a newer release is published.
+> Latest version is shown on the JitPack badge above. Replace `1.1.5` if a newer release is published.
 
 ## Quick Start (View)
 
@@ -142,6 +143,8 @@ class MainActivity : AppCompatActivity() {
                     val owner = result.maskedOwnerName()    // "A**** A****" or null
                     val aid = result.aidDisplayName         // "Visa Credit/Debit" or null
                     val pinTries = result.pinTriesRemaining // 3 or null
+                    val expiry = result.expiryDate?.displayMmYy() // "12/27" or null
+                    val expired = result.expiryDate?.isExpired() == true
 
                     if (isWallet) showWalletCard(cardNumber, source.displayName)
                     else showPhysicalCard(cardNumber, cardType.displayName)
@@ -191,6 +194,10 @@ fun CardReaderScreen() {
                 result.maskedOwnerName()?.let { Text(it, fontSize = 14.sp) }
                 result.aidDisplayName?.let { Text(it, fontSize = 12.sp, color = Color.Gray) }
                 result.pinTriesRemaining?.let { Text("PIN tries left: $it", fontSize = 12.sp) }
+                result.expiryDate?.let {
+                    val color = if (it.isExpired()) Color.Red else Color.Unspecified
+                    Text("Expires: ${it.displayMmYy()}", fontSize = 12.sp, color = color)
+                }
                 if (result.isTokenizedWallet) Text("Tokenized (DPAN)", fontSize = 12.sp, color = Color.Gray)
             }
             is CardData.Error -> Text("❌ ${result.message}", color = Color.Red)
@@ -216,6 +223,7 @@ fun CardReaderScreen() {
 | `aid` | `String?` | `"A0000000031010"` | Selected AID (tag `4F`), uppercase hex. |
 | `aidDisplayName` | `String?` | `"Visa Credit/Debit"` | Friendly label resolved by `AidLabels`. `null` if unknown. |
 | `pinTriesRemaining` | `Int?` | `3` | Offline PIN Try Counter (tag **`9F17`**). `null` if not exposed. |
+| `expiryDate` | `ExpiryDate?` | `ExpiryDate(2027, 12)` | Application Expiration Date (tag **`5F24`**). `null` if card omits it. |
 | `isTokenizedWallet` | `Boolean` | `true` | `paymentSource.isDigitalWallet`. |
 | `isPhysicalCard` | `Boolean` | `false` | `paymentSource.isPhysicalCard`. |
 
@@ -224,6 +232,16 @@ fun CardReaderScreen() {
 | Method | Returns | Description |
 |---|---|---|
 | `maskedOwnerName()` | `String?` | Privacy-safe display form of `cardholderName`, e.g. `"A**** A****"`. Splits on whitespace and `/`, keeps first letter of each token. Returns `null` when name is missing or blank. |
+
+### `ExpiryDate`
+
+```kotlin
+data class ExpiryDate(val year: Int, val month: Int) {
+    fun displayMmYy(): String        // "12/27"
+    fun displayMmYyyy(): String      // "12/2027"
+    fun isExpired(now: Calendar = Calendar.getInstance()): Boolean
+}
+```
 
 ### `PaymentSource` enum
 
@@ -466,14 +484,19 @@ No. NFC card emulation between two real devices is required for wallet testing. 
 ## Roadmap
 
 - [ ] Track 2 equivalent data parsing (`57`)
-- [ ] Application Expiration Date (`5F24`) exposure
 - [ ] Application Currency Code (`9F42`)
 - [ ] Maven Central publishing in addition to JitPack
 - [ ] CI release workflow with GitHub Actions
 
 ## Changelog
 
-### v1.1.4 (Current)
+### v1.1.5 (Current)
+- Expose **Application Expiration Date** (EMV tag `5F24`) as `expiryDate: ExpiryDate?` on `CardData.Success`
+- `ExpiryDate.isExpired()`, `displayMmYy()`, `displayMmYyyy()` helpers
+- GET DATA `5F24` fallback when AFL records omit the tag
+- Sample app shows expiry on detected card (red when expired)
+
+### v1.1.4
 - Read **cardholder name** from EMV tag `5F20` and expose `cardholderName` + `maskedOwnerName()` on `CardData.Success`
 - Show **remaining offline PIN tries** (`9F17`) via `pinTriesRemaining`
 - Expose selected **AID** (`4F`) and friendly name via `aid` + `aidDisplayName` (backed by `AidLabels`)
@@ -532,4 +555,4 @@ MIT License - Copyright (c) 2025 Armen Asatryan
 
 ---
 
-**Keywords**: android nfc credit card reader library, read PAN from contactless card kotlin, EMV nfc android library, google wallet detection android, apple pay detection android, samsung pay nfc detection, dpan vs pan android, kotlin coroutines nfc reader, emv tag 5f20 cardholder name, emv tag 9f17 pin try counter, emv tag 9f6e form factor indicator, emv tag 9f19 token requestor id, visa mastercard nfc kotlin, jitpack android library
+**Keywords**: android nfc credit card reader library, read PAN from contactless card kotlin, EMV nfc android library, google wallet detection android, apple pay detection android, samsung pay nfc detection, dpan vs pan android, kotlin coroutines nfc reader, emv tag 5f20 cardholder name, emv tag 9f17 pin try counter, emv tag 5f24 expiry, emv tag 9f6e form factor indicator, emv tag 9f19 token requestor id, visa mastercard nfc kotlin, jitpack android library
