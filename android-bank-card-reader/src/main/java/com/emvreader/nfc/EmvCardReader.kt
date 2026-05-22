@@ -289,18 +289,24 @@ class EmvCardReader(
 
         logCollectedTlv("after_AFL")
 
-        // If cardholder name still not found, probe SFIs not in AFL (SFI 1 commonly
-        // holds cardholder data that issuers omit from contactless AFL for privacy).
-        if (TlvParser.extractCardholderName(collectedTlvData) == null) {
-            val aflSfis = aflEntries.map { it.sfi }.toSet()
-            probeExtraRecordsForName(isoDep, aflSfis)
-        }
-        logCollectedTlv("after_extra_SFI_probe")
+        // Digital wallets (Apple Pay, Google Wallet, Samsung Pay) tear down their HCE
+        // session after the AFL exchange. Extra READ_RECORD / GET_DATA APDUs then stall
+        // until the per-call timeout, leaving the UI stuck on "loading". Skip the
+        // enhancement scan for wallets — they don't expose 5F20 / 9F17 anyway.
+        if (CardSourceDetector.detect(collectedTlvData).source.isDigitalWallet) {
+            emvLog("wallet detected — skipping probe/GET_DATA enhancement scan")
+        } else {
+            if (TlvParser.extractCardholderName(collectedTlvData) == null) {
+                val aflSfis = aflEntries.map { it.sfi }.toSet()
+                probeExtraRecordsForName(isoDep, aflSfis)
+            }
+            logCollectedTlv("after_extra_SFI_probe")
 
-        mergeCardholderFromGetData(isoDep)
-        mergePinTryCounterFromGetData(isoDep)
-        mergeExpiryFromGetData(isoDep)
-        logCollectedTlv("after_GET_DATA_5F20_9F17_5F24")
+            mergeCardholderFromGetData(isoDep)
+            mergePinTryCounterFromGetData(isoDep)
+            mergeExpiryFromGetData(isoDep)
+            logCollectedTlv("after_GET_DATA_5F20_9F17_5F24")
+        }
 
         foundPan?.let {
             val name = TlvParser.extractCardholderName(collectedTlvData)
@@ -569,10 +575,14 @@ class EmvCardReader(
             }
         }
         logCollectedTlv("direct_after_scan")
-        mergeCardholderFromGetData(isoDep)
-        mergePinTryCounterFromGetData(isoDep)
-        mergeExpiryFromGetData(isoDep)
-        logCollectedTlv("direct_after_GET_DATA")
+        if (CardSourceDetector.detect(collectedTlvData).source.isDigitalWallet) {
+            emvLog("wallet detected — skipping GET_DATA enhancement scan (direct)")
+        } else {
+            mergeCardholderFromGetData(isoDep)
+            mergePinTryCounterFromGetData(isoDep)
+            mergeExpiryFromGetData(isoDep)
+            logCollectedTlv("direct_after_GET_DATA")
+        }
         foundPan?.let {
             emvLog("tryDirectRecordRead success last4=${it.takeLast(4)} name=${TlvParser.extractCardholderName(collectedTlvData)}")
             return createSuccess(it)
