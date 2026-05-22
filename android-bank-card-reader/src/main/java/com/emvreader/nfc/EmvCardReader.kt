@@ -291,10 +291,12 @@ class EmvCardReader(
 
         // Digital wallets (Apple Pay, Google Wallet, Samsung Pay) tear down their HCE
         // session after the AFL exchange. Extra READ_RECORD / GET_DATA APDUs then stall
-        // until the per-call timeout, leaving the UI stuck on "loading". Skip the
-        // enhancement scan for wallets — they don't expose 5F20 / 9F17 anyway.
-        if (CardSourceDetector.detect(collectedTlvData).source.isDigitalWallet) {
-            emvLog("wallet detected — skipping probe/GET_DATA enhancement scan")
+        // until the per-call timeout, leaving the UI stuck on "loading". Token Requestor
+        // ID (9F19) is wallet-exclusive — its presence is a reliable skip signal.
+        // Physical cards may emit 9F6E with the "network connected" bit set, so the
+        // broader isDigitalWallet check would incorrectly skip them.
+        if (collectedTlvData.containsKey(TlvParser.TAG_TOKEN_REQUESTOR_ID)) {
+            emvLog("wallet detected (9F19 present) — skipping probe/GET_DATA enhancement scan")
         } else {
             if (TlvParser.extractCardholderName(collectedTlvData) == null) {
                 val aflSfis = aflEntries.map { it.sfi }.toSet()
@@ -575,8 +577,8 @@ class EmvCardReader(
             }
         }
         logCollectedTlv("direct_after_scan")
-        if (CardSourceDetector.detect(collectedTlvData).source.isDigitalWallet) {
-            emvLog("wallet detected — skipping GET_DATA enhancement scan (direct)")
+        if (collectedTlvData.containsKey(TlvParser.TAG_TOKEN_REQUESTOR_ID)) {
+            emvLog("wallet detected (9F19 present) — skipping GET_DATA enhancement scan (direct)")
         } else {
             mergeCardholderFromGetData(isoDep)
             mergePinTryCounterFromGetData(isoDep)
