@@ -39,37 +39,62 @@ object TlvParser {
     /** Application Expiration Date — YYMMDD BCD (3 bytes). */
     const val TAG_EXPIRY = "5F24"
 
+    /** PPSE directory entry template (one per application). */
+    const val TAG_DIRECTORY_ENTRY = "61"
+    /** Application Priority Indicator — low nibble 1 (highest) .. 15; 0 = no priority. */
+    const val TAG_APPLICATION_PRIORITY = "87"
+
     data class TlvData(val tag: String, val length: Int, val value: ByteArray)
 
+    /**
+     * Flattens all data objects (including nested ones) into a map keyed by tag.
+     * When a tag occurs more than once, the last occurrence wins — use [parsePpseApplications]
+     * for the PPSE directory, where tags `4F`/`50`/`87` repeat per application.
+     */
     fun parse(data: ByteArray): Map<String, TlvData> {
         val result = mutableMapOf<String, TlvData>()
-        var offset = 0
-
-        while (offset < data.size) {
-            try {
-                val (tag, tagEnd) = parseTag(data, offset)
-                offset = tagEnd
-                if (offset >= data.size) break
-
-                val (length, lengthEnd) = parseLength(data, offset)
-                offset = lengthEnd
-                if (offset + length > data.size) break
-
-                val value = data.copyOfRange(offset, offset + length)
-                offset += length
-
-                result[tag] = TlvData(tag, length, value)
-
-                // Parse nested constructed tags
-                if (isEmvConstructed(tag) && value.isNotEmpty()) {
-                    result.putAll(parse(value))
-                }
-            } catch (e: Exception) {
-                break
+        for (tlv in readLevel(data)) {
+            result[tlv.tag] = tlv
+            if (isEmvConstructed(tlv.tag) && tlv.value.isNotEmpty()) {
+                result.putAll(parse(tlv.value))
             }
         }
-
         return result
+    }
+
+    /**
+     * Data objects at one nesting level, in card order (duplicates kept).
+     * Skips `00` / `FF` padding bytes, which ISO 7816-4 allows before, between and after objects.
+     * Stops at the first malformed object.
+     */
+    private fun readLevel(data: ByteArray): List<TlvData> {
+        val result = mutableListOf<TlvData>()
+        var offset = 0
+        while (offset < data.size) {
+            val first = data[offset].toInt() and 0xFF
+            if (first == 0x00 || first == 0xFF) {
+                offset++
+                continue
+            }
+            val (tlv, next) = (
+                try {
+                    readOne(data, offset)
+                } catch (e: Exception) {
+                    null
+                }
+                ) ?: break
+            result += tlv
+            offset = next
+        }
+        return result
+    }
+
+    private fun readOne(data: ByteArray, start: Int): Pair<TlvData, Int>? {
+        val (tag, tagEnd) = parseTag(data, start)
+        if (tagEnd >= data.size) return null
+        val (length, lengthEnd) = parseLength(data, tagEnd)
+        if (length < 0 || lengthEnd + length > data.size) return null
+        return TlvData(tag, length, data.copyOfRange(lengthEnd, lengthEnd + length)) to lengthEnd + length
     }
 
     private fun parseTag(data: ByteArray, start: Int): Pair<String, Int> {
@@ -237,6 +262,46 @@ object TlvParser {
     }
 
     data class AflEntry(val sfi: Int, val firstRecord: Int, val lastRecord: Int)
+
+    /**
+     * One payment application listed in the PPSE directory.
+     *
+     * @property aidHex Application identifier (tag `4F`), uppercase hex.
+     * @property label Application label (tag `50`), if present.
+     * @property priority 1 (highest) .. 15 from tag `87`; **null** when absent or "no priority".
+     */
+    data class PpseApplication(val aidHex: String, val label: String?, val priority: Int?)
+
+    /**
+     * Every application in a PPSE response (`61` entries), highest priority first.
+     * Applications without a priority keep their card order after the prioritised ones.
+     * The PPSE's own DF name (`84`) is never returned.
+     */
+    fun parsePpseApplications(ppseResponse: ByteArray): List<PpseApplication> {
+        val entries = mutableListOf<PpseApplication>()
+        collectDirectoryEntries(readLevel(ppseResponse), entries)
+        return entries.sortedBy { it.priority ?: Int.MAX_VALUE } // stable: ties keep card order
+    }
+
+    private fun collectDirectoryEntries(level: List<TlvData>, out: MutableList<PpseApplication>) {
+        for (tlv in level) {
+            if (tlv.tag == TAG_DIRECTORY_ENTRY) {
+                val fields = readLevel(tlv.value).associateBy { it.tag }
+                val aid = fields[TAG_AID]?.value?.takeIf { it.isNotEmpty() } ?: continue
+                out += PpseApplication(
+                    aidHex = aid.toHex(),
+                    label = fields[TAG_APPLICATION_LABEL]?.value
+                        ?.let { String(it, Charsets.ISO_8859_1).trim() }
+                        ?.takeIf { it.isNotEmpty() },
+                    priority = fields[TAG_APPLICATION_PRIORITY]?.value?.firstOrNull()
+                        ?.let { it.toInt() and 0x0F }
+                        ?.takeIf { it != 0 }
+                )
+            } else if (isEmvConstructed(tlv.tag)) {
+                collectDirectoryEntries(readLevel(tlv.value), out)
+            }
+        }
+    }
 
     private fun List<Byte>.toHex(): String = joinToString("") { "%02X".format(it) }
     private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }

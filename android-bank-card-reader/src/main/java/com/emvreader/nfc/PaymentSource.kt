@@ -10,8 +10,8 @@ package com.emvreader.nfc
  * 
  * ### EMV Tag 9F6E - Form Factor Indicator (FFI)
  * - Indicates the physical form factor of the payment device
- * - Physical cards typically return: 0x30 0x30 (ASCII "00") or 0x01-0x03
- * - Mobile devices typically return: 0x31 0x30 (ASCII "10") or 0x05-0x06
+ * - Layout is scheme-specific: Visa Form Factor Indicator vs Mastercard Third Party Data
+ *   (decoded by the card's RID — see [CardSourceDetector])
  * 
  * ### EMV Tag 9F19 - Token Requestor ID
  * - Identifies the entity that requested tokenization (wallet provider)

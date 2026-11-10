@@ -1,16 +1,18 @@
 package com.emvreader.nfc
 
 import android.nfc.Tag
+import android.nfc.TagLostException
 import android.nfc.tech.IsoDep
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.security.SecureRandom
 import java.util.Calendar
 
 /**
  * EMV NFC Card Reader for contactless payment cards.
- * 
+ *
  * Supports reading PAN (Primary Account Number) from:
  * - Visa (including qVSDC)
  * - Mastercard
@@ -19,14 +21,17 @@ import java.util.Calendar
  * - UnionPay
  * - JCB
  * - Mir
- * 
+ *
  * Also detects payment source (physical card vs digital wallets):
  * - Physical cards (traditional plastic EMV cards)
  * - Google Wallet / Google Pay
  * - Samsung Pay
  * - Apple Pay
  * - Other digital wallets
- * 
+ *
+ * One instance can be shared: every [readCard] call keeps its own state, so overlapping
+ * reads (e.g. two quick taps) never mix data.
+ *
  * Usage:
  * ```kotlin
  * val reader = EmvCardReader()
@@ -47,53 +52,18 @@ class EmvCardReader(
 
     private companion object {
         const val LOG_TAG = "EmvCardReader"
-    }
-    /**
-     * Aggregated TLV data collected during card reading.
-     * Used for payment source detection.
-     */
-    private val collectedTlvData = mutableMapOf<String, TlvParser.TlvData>()
 
-    private fun emvLog(msg: String) {
-        if (!config.debugEmv) return
-        Log.d(LOG_TAG, msg)
-    }
+        /** Terminal Transaction Qualifiers — the only PDOL entry the TTQ variants change. */
+        const val TAG_TTQ = "9F66"
 
-    /** Log sorted tag keys, presence of name-related tags, and decoded name if any. */
-    private fun logCollectedTlv(phase: String) {
-        if (!config.debugEmv) return
-        val keys = collectedTlvData.keys.sorted()
-        val extracted = TlvParser.extractCardholderName(collectedTlvData)
-        val has5F20 = collectedTlvData.containsKey(TlvParser.TAG_CARDHOLDER_NAME)
-        val has56 = collectedTlvData.containsKey(TlvParser.TAG_TRACK1)
-        emvLog(
-            "[$phase] tagCount=${keys.size} keys=${keys.joinToString(",")} " +
-                "has5F20=$has5F20 has56=$has56 extractCardholderName=${extracted?.let { "\"$it\"" } ?: "null"}"
-        )
-        collectedTlvData[TlvParser.TAG_CARDHOLDER_NAME]?.value?.let { v ->
-            emvLog("[$phase] 5F20 raw len=${v.size} hex=${v.toHex().hexPreview()}")
-        }
-        collectedTlvData[TlvParser.TAG_TRACK1]?.value?.let { v ->
-            emvLog("[$phase] 56 Track1 len=${v.size} hex=${v.toHex().hexPreview()}")
-        }
-        collectedTlvData[TlvParser.TAG_EXPIRY]?.value?.let { v ->
-            val parsed = TlvParser.extractExpiry(collectedTlvData)
-            emvLog(
-                "[$phase] 5F24 raw len=${v.size} hex=${v.toHex().hexPreview()} " +
-                    "parsed=${parsed?.let { "${it.year}-${"%02d".format(it.month)}" } ?: "null"}"
-            )
-        }
-    }
+        /** GPO status words after which another TTQ variant is worth trying. */
+        val GPO_RETRY_STATUS_WORDS = setOf(0x6985, 0x6984, 0x6A81)
 
-    private fun logApduResult(label: String, command: ByteArray, response: ByteArray) {
-        if (!config.debugEmv) return
-        val sw = response.getStatusWord()
-        val ok = response.isSuccess()
-        val dataLen = if (response.size >= 2) maxOf(0, response.size - 2) else 0
-        emvLog(
-            "$label cmd=${command.toHex().hexPreview(48)} ok=$ok SW=${"%04X".format(sw)} dataLen=$dataLen " +
-                "dataHex=${response.getData().toHex().hexPreview()}"
-        )
+        /** READ RECORD status words meaning "nothing more in this SFI". */
+        val PROBE_STOP_STATUS_WORDS = setOf(0x6A83, 0x6A82, 0x6982)
+
+        /** SFI → records scanned when GPO fails and there is no AFL to follow. */
+        val DIRECT_READ_LOCATIONS = listOf(1 to 1..4, 2 to 1..4, 3 to 1..2, 4 to 1..2)
     }
 
     /**
@@ -102,397 +72,344 @@ class EmvCardReader(
      * @return CardData with PAN information, payment source detection, or error details
      */
     suspend fun readCard(tag: Tag): CardData = withContext(Dispatchers.IO) {
-        // Clear collected TLV data from previous reads
-        collectedTlvData.clear()
-        
         val isoDep = IsoDep.get(tag)
-        
-        if (isoDep == null) {
-            return@withContext CardData.Error(
+            ?: return@withContext CardData.Error(
                 code = ErrorCode.UNSUPPORTED_CARD,
                 message = "This card type is not supported for contactless reading"
             )
-        }
 
         try {
             isoDep.timeout = config.timeoutMs
             isoDep.connect()
-            emvLog("readCard: start")
-
-            // Step 1: Select PPSE
-            val ppseResponse = selectPpse(isoDep) ?: run {
-                return@withContext CardData.Error(
-                    code = ErrorCode.PPSE_NOT_FOUND,
-                    message = "Card does not support contactless reading"
-                )
-            }
-
-            // Step 2: Parse PPSE and extract AIDs
-            val ppseData = TlvParser.parse(ppseResponse)
-            collectedTlvData.putAll(ppseData) // Collect for source detection
-            val aids = extractAidsFromPpse(ppseData).ifEmpty { EmvConstants.KNOWN_AIDS }
-            
-            // Step 3: Try each AID
-            for (aid in aids) {
-                emvLog("try AID=${aid.toHex()}")
-                val result = tryReadWithAid(isoDep, aid)
-                if (result is CardData.Success) {
-                    val expStr = result.expiryDate?.let {
-                        "${it.displayMmYy()} expired=${it.isExpired()}"
-                    } ?: "null"
-                    emvLog(
-                        "readCard: success last4=${result.pan.takeLast(4)} " +
-                            "aid=${result.aid ?: "null"} " +
-                            "pinTries=${result.pinTriesRemaining ?: "null"} " +
-                            "expiry=$expStr " +
-                            "cardholderName=${result.cardholderName?.let { "\"$it\"" } ?: "null"}"
-                    )
-                    return@withContext result
-                }
-            }
-            emvLog("readCard: no success for any AID")
-
-            return@withContext CardData.Error(
-                code = ErrorCode.PAN_NOT_FOUND,
-                message = "Could not read card number"
-            )
-
+            read(ApduTransport { isoDep.transceive(it) })
         } catch (e: Exception) {
-            return@withContext when {
-                e.message?.contains("Tag was lost") == true -> CardData.Error(
-                    code = ErrorCode.TAG_LOST,
-                    message = "Card was removed too quickly. Please hold steady."
-                )
-                e.message?.contains("Transceive failed") == true -> CardData.Error(
-                    code = ErrorCode.COMMUNICATION_ERROR,
-                    message = "Communication error. Please try again."
-                )
-                else -> CardData.Error(
-                    code = ErrorCode.UNKNOWN,
-                    message = e.message ?: "An unexpected error occurred"
-                )
-            }
+            mapException(e)
         } finally {
             runCatching { isoDep.close() }
         }
     }
 
-    private fun selectPpse(isoDep: IsoDep): ByteArray? {
-        val command = ApduBuilder.selectPpse()
-        val response = isoDep.transceive(command)
-        return if (response.isSuccess()) response.getData() else null
-    }
-
-    private fun extractAidsFromPpse(tlvData: Map<String, TlvParser.TlvData>): List<ByteArray> {
-        val aids = mutableListOf<ByteArray>()
-        tlvData[TlvParser.TAG_AID]?.let { aids.add(it.value) }
-        tlvData[TlvParser.TAG_DF_NAME]?.let { aids.add(it.value) }
-        return aids
-    }
-
-    private fun tryReadWithAid(isoDep: IsoDep, aid: ByteArray): CardData {
-        // SELECT application
-        val selectCmd = ApduBuilder.select(aid)
-        val selectResponse = isoDep.transceive(selectCmd)
-        logApduResult("SELECT", selectCmd, selectResponse)
-
-        if (!selectResponse.isSuccess()) {
-            emvLog("SELECT failed SW=${"%04X".format(selectResponse.getStatusWord())}")
-            return CardData.Error(ErrorCode.AID_NOT_FOUND, "Application not found")
+    /** Runs the EMV read over [transport]. Transport failures are mapped to [CardData.Error]. */
+    internal fun read(transport: ApduTransport): CardData =
+        try {
+            ReadSession(transport).run()
+        } catch (e: Exception) {
+            mapException(e)
         }
 
-        val selectData = TlvParser.parse(selectResponse.getData())
-        collectedTlvData.putAll(selectData) // Collect for source detection
-        logCollectedTlv("after_SELECT")
-
-        var foundPan: String? = TlvParser.extractPan(selectData)?.takeIf { it.isValidPan() }
-        foundPan?.let { pan ->
-            emvLog("PAN in SELECT len=${pan.length} last4=${pan.takeLast(4)} (still reading AFL for name)")
-        }
-
-        // GET PROCESSING OPTIONS with various TTQ values
-        val pdol = TlvParser.extractPdol(selectData)
-        var gpoResponse = tryGpoWithVariants(isoDep, pdol)
-
-        if (!gpoResponse.isSuccess()) {
-            emvLog("GPO variants failed SW=${"%04X".format(gpoResponse.getStatusWord())}, try empty PDOL")
-            // Try empty PDOL
-            val emptyCmd = ApduBuilder.gpo(null)
-            val emptyGpo = isoDep.transceive(emptyCmd)
-            logApduResult("GPO(empty)", emptyCmd, emptyGpo)
-
-            if (!emptyGpo.isSuccess()) {
-                emvLog("GPO empty failed -> tryDirectRecordRead")
-                // Fallback: direct record read
-                return tryDirectRecordRead(isoDep)
-            }
-            gpoResponse = emptyGpo
-        }
-
-        val gpoData = TlvParser.parse(gpoResponse.getData())
-        collectedTlvData.putAll(gpoData) // Collect for source detection
-        logCollectedTlv("after_GPO")
-
-        if (foundPan == null) {
-            TlvParser.extractPan(gpoData)?.let {
-                if (it.isValidPan()) {
-                    foundPan = it
-                    emvLog("PAN in GPO len=${it.length} last4=${it.takeLast(4)} (still reading AFL for name)")
-                }
-            }
-        }
-
-        // Read all AFL records so tag 5F20 (cardholder) in a later record is merged before success
-        val aflEntries = TlvParser.extractAfl(gpoData)
-        emvLog("AFL entries=${aflEntries.size} ${
-            aflEntries.joinToString(";") { "SFI=${it.sfi} r${it.firstRecord}-${it.lastRecord}" }
-        }")
-        if (aflEntries.isEmpty()) {
-            emvLog("AFL empty — name may only come from GET DATA 5F20")
-        }
-
-        for (entry in aflEntries) {
-            for (record in entry.firstRecord..entry.lastRecord) {
-                try {
-                    val readCmd = ApduBuilder.readRecord(record, entry.sfi)
-                    val readResponse = isoDep.transceive(readCmd)
-
-                    if (readResponse.isSuccess()) {
-                        val recordData = TlvParser.parse(readResponse.getData())
-                        val newTags = recordData.keys.filter { it !in collectedTlvData.keys }.sorted()
-                        collectedTlvData.putAll(recordData)
-                        emvLog(
-                            "READ_RECORD SFI=${entry.sfi} record=$record ok=true " +
-                                "newTags=${newTags.joinToString(",")} " +
-                                "has5F20InRecord=${recordData.containsKey(TlvParser.TAG_CARDHOLDER_NAME)}"
-                        )
-                        recordData[TlvParser.TAG_CARDHOLDER_NAME]?.value?.let { v ->
-                            emvLog("  -> 5F20 in this record hex=${v.toHex().hexPreview()}")
-                        }
-                        if (foundPan == null) {
-                            TlvParser.extractPan(recordData)?.let { pan ->
-                                if (pan.isValidPan()) foundPan = pan
-                            }
-                        }
-                    } else {
-                        emvLog(
-                            "READ_RECORD SFI=${entry.sfi} record=$record ok=false SW=${
-                                "%04X".format(readResponse.getStatusWord())
-                            }"
-                        )
-                    }
-                } catch (e: Exception) {
-                    emvLog("READ_RECORD SFI=${entry.sfi} record=$record exception=${e.message}")
-                }
-            }
-        }
-
-        logCollectedTlv("after_AFL")
-
-        // Digital wallets (Apple Pay, Google Wallet, Samsung Pay) tear down their HCE
-        // session after the AFL exchange. Extra READ_RECORD / GET_DATA APDUs then stall
-        // until the per-call timeout, leaving the UI stuck on "loading". Token Requestor
-        // ID (9F19) is wallet-exclusive — its presence is a reliable skip signal.
-        // Physical cards may emit 9F6E with the "network connected" bit set, so the
-        // broader isDigitalWallet check would incorrectly skip them.
-        if (collectedTlvData.containsKey(TlvParser.TAG_TOKEN_REQUESTOR_ID)) {
-            emvLog("wallet detected (9F19 present) — skipping probe/GET_DATA enhancement scan")
-        } else {
-            if (TlvParser.extractCardholderName(collectedTlvData) == null) {
-                val aflSfis = aflEntries.map { it.sfi }.toSet()
-                probeExtraRecordsForName(isoDep, aflSfis)
-            }
-            logCollectedTlv("after_extra_SFI_probe")
-
-            mergeCardholderFromGetData(isoDep)
-            mergePinTryCounterFromGetData(isoDep)
-            mergeExpiryFromGetData(isoDep)
-            logCollectedTlv("after_GET_DATA_5F20_9F17_5F24")
-        }
-
-        foundPan?.let {
-            val name = TlvParser.extractCardholderName(collectedTlvData)
-            emvLog("tryReadWithAid success last4=${it.takeLast(4)} finalExtractedName=${name?.let { n -> "\"$n\"" } ?: "null"}")
-            return createSuccess(it)
-        }
-
-        emvLog("tryReadWithAid: PAN_NOT_FOUND after AFL+GET DATA")
-        return CardData.Error(ErrorCode.PAN_NOT_FOUND, "Could not read card number")
+    private fun mapException(e: Exception): CardData.Error = when {
+        e is TagLostException || e.message?.contains("Tag was lost") == true -> CardData.Error(
+            code = ErrorCode.TAG_LOST,
+            message = "Card was removed too quickly. Please hold steady."
+        )
+        e is IOException -> CardData.Error(
+            code = ErrorCode.COMMUNICATION_ERROR,
+            message = "Communication error. Please try again."
+        )
+        else -> CardData.Error(
+            code = ErrorCode.UNKNOWN,
+            message = e.message ?: "An unexpected error occurred"
+        )
     }
 
     /**
-     * Read records from SFIs not already covered by AFL, looking for 5F20.
-     * SFI 1 is the most common extra location for cardholder data on Visa.
+     * Data gathered while reading one application. A fresh context is used per AID, so tags
+     * from an application that yielded no PAN never leak into the result of the next one.
      */
-    private fun probeExtraRecordsForName(isoDep: IsoDep, aflSfis: Set<Int>) {
-        val probeSfis = (1..10).filter { it !in aflSfis }
-        emvLog("probeExtraRecords SFIs=$probeSfis (AFL covered $aflSfis)")
-        for (sfi in probeSfis) {
-            for (record in 1..5) {
-                try {
-                    val readCmd = ApduBuilder.readRecord(record, sfi)
-                    val response = isoDep.transceive(readCmd)
+    private class AppContext(directoryEntry: TlvParser.PpseApplication) {
+        val tlv = mutableMapOf<String, TlvParser.TlvData>()
+        var aidHex: String = directoryEntry.aidHex
+        var pan: String? = null
+
+        init {
+            val aid = directoryEntry.aidHex.hexToBytes()
+            tlv[TlvParser.TAG_AID] = TlvParser.TlvData(TlvParser.TAG_AID, aid.size, aid)
+            directoryEntry.label?.let { label ->
+                val bytes = label.toByteArray(Charsets.ISO_8859_1)
+                tlv[TlvParser.TAG_APPLICATION_LABEL] =
+                    TlvParser.TlvData(TlvParser.TAG_APPLICATION_LABEL, bytes.size, bytes)
+            }
+        }
+
+        fun merge(data: Map<String, TlvParser.TlvData>) {
+            tlv.putAll(data)
+            if (pan == null) pan = TlvParser.extractPan(data)?.takeIf { it.isValidPan() }
+        }
+    }
+
+    /** All state for one physical read. Never shared between reads. */
+    private inner class ReadSession(private val transport: ApduTransport) {
+
+        /** First transport failure. Once set the card is gone and no further APDU is sent. */
+        private var linkFailure: Exception? = null
+        private var anyAppSelected = false
+
+        fun run(): CardData {
+            emvLog("readCard: start")
+            val ppse = transmit(ApduBuilder.selectPpse())
+            val directory =
+                if (ppse.isSuccess()) TlvParser.parsePpseApplications(ppse.getData()) else emptyList()
+            emvLog(
+                "PPSE ok=${ppse.isSuccess()} apps=" +
+                    directory.joinToString(",") { "${it.aidHex}(prio=${it.priority ?: "-"})" }
+            )
+            val candidates = directory.ifEmpty {
+                EmvConstants.KNOWN_AIDS.map { TlvParser.PpseApplication(it.toHex(), label = null, priority = null) }
+            }
+
+            for (app in candidates) {
+                val result = readApp(app) ?: continue
+                emvLog(
+                    "readCard: success last4=${result.pan.takeLast(4)} aid=${result.aid} " +
+                        "pinTries=${result.pinTriesRemaining ?: "null"} " +
+                        "expiry=${result.expiryDate?.let { "${it.displayMmYy()} expired=${it.isExpired()}" } ?: "null"} " +
+                        "cardholderName=${result.cardholderName?.let { "\"$it\"" } ?: "null"}"
+                )
+                return result
+            }
+
+            emvLog("readCard: no success for any AID")
+            return when {
+                anyAppSelected -> CardData.Error(ErrorCode.PAN_NOT_FOUND, "Could not read card number")
+                !ppse.isSuccess() -> CardData.Error(
+                    ErrorCode.PPSE_NOT_FOUND, "Card does not support contactless reading"
+                )
+                else -> CardData.Error(ErrorCode.AID_NOT_FOUND, "No supported payment application found on card")
+            }
+        }
+
+        /** Reads one application. Null when it can't be selected or yields no PAN. */
+        private fun readApp(app: TlvParser.PpseApplication): CardData.Success? {
+            emvLog("try AID=${app.aidHex}")
+            val selectCmd = ApduBuilder.select(app.aidHex.hexToBytes())
+            val selectResponse = transmit(selectCmd)
+            logApduResult("SELECT", selectCmd, selectResponse)
+            if (!selectResponse.isSuccess()) return null
+            anyAppSelected = true
+
+            val ctx = AppContext(app)
+            try {
+                readAppData(ctx, TlvParser.parse(selectResponse.getData()))
+            } catch (e: Exception) {
+                // Card left mid-read: keep the partial result if the PAN is already known.
+                if (linkFailure == null || ctx.pan == null) throw e
+                emvLog("link lost after PAN was read — returning partial data")
+            }
+
+            val pan = ctx.pan
+            if (pan == null) {
+                linkFailure?.let { throw it }
+                emvLog("AID=${app.aidHex}: PAN_NOT_FOUND")
+                return null
+            }
+            return createSuccess(pan, ctx)
+        }
+
+        private fun readAppData(ctx: AppContext, selectData: Map<String, TlvParser.TlvData>) {
+            ctx.merge(selectData)
+            selectData[TlvParser.TAG_DF_NAME]?.value?.takeIf { it.isNotEmpty() }?.let { ctx.aidHex = it.toHex() }
+            logTlv("after_SELECT", ctx.tlv)
+
+            val gpoResponse = getProcessingOptions(TlvParser.extractPdol(selectData))
+            val aflSfis: Set<Int>?
+            if (gpoResponse == null) {
+                emvLog("GPO failed -> direct record read")
+                readRecordsDirectly(ctx)
+                aflSfis = null
+            } else {
+                val gpoData = TlvParser.parse(gpoResponse.getData())
+                ctx.merge(gpoData)
+                logTlv("after_GPO", ctx.tlv)
+                val afl = TlvParser.extractAfl(gpoData)
+                readAflRecords(ctx, afl)
+                aflSfis = afl.map { it.sfi }.toSet()
+            }
+            logTlv("after_records", ctx.tlv)
+
+            enhance(ctx, aflSfis)
+        }
+
+        /**
+         * GPO with each TTQ variant (only when the PDOL actually asks for TTQ), then with an
+         * empty PDOL if that is a different command. Null if every attempt fails.
+         */
+        private fun getProcessingOptions(pdol: ByteArray?): ByteArray? {
+            val pdolEntries = parsePdol(pdol)
+            val ttqVariants =
+                if (pdolEntries.any { it.first == TAG_TTQ }) EmvConstants.TTQ_VARIANTS
+                else EmvConstants.TTQ_VARIANTS.take(1)
+
+            for (ttq in ttqVariants) {
+                val cmd = ApduBuilder.gpo(buildPdolData(pdolEntries, ttq))
+                val response = transmit(cmd)
+                logApduResult("GPO", cmd, response)
+                if (response.isSuccess()) return response
+                if (response.getStatusWord() !in GPO_RETRY_STATUS_WORDS) break
+            }
+
+            if (pdolEntries.isNotEmpty()) {
+                val cmd = ApduBuilder.gpo(null)
+                val response = transmit(cmd)
+                logApduResult("GPO(empty)", cmd, response)
+                if (response.isSuccess()) return response
+            }
+            return null
+        }
+
+        private fun readAflRecords(ctx: AppContext, afl: List<TlvParser.AflEntry>) {
+            emvLog("AFL entries=${afl.size} ${afl.joinToString(";") { "SFI=${it.sfi} r${it.firstRecord}-${it.lastRecord}" }}")
+            for (entry in afl) {
+                for (record in entry.firstRecord..entry.lastRecord) {
+                    val response = transmitOrNull(ApduBuilder.readRecord(record, entry.sfi)) ?: return
                     if (response.isSuccess()) {
-                        val recordData = TlvParser.parse(response.getData())
-                        val newTags = recordData.keys.filter { it !in collectedTlvData.keys }.sorted()
-                        collectedTlvData.putAll(recordData)
-                        emvLog(
-                            "probe READ_RECORD SFI=$sfi record=$record ok=true " +
-                                "newTags=${newTags.joinToString(",")} " +
-                                "has5F20=${recordData.containsKey(TlvParser.TAG_CARDHOLDER_NAME)}"
-                        )
-                        recordData[TlvParser.TAG_CARDHOLDER_NAME]?.value?.let { v ->
-                            emvLog("  -> 5F20 in probe hex=${v.toHex().hexPreview()}")
-                        }
-                        if (TlvParser.extractCardholderName(collectedTlvData) != null) {
-                            emvLog("probeExtraRecords: name found in SFI=$sfi record=$record")
+                        ctx.merge(TlvParser.parse(response.getData()))
+                        emvLog("READ_RECORD SFI=${entry.sfi} record=$record ok")
+                    } else {
+                        emvLog("READ_RECORD SFI=${entry.sfi} record=$record SW=${"%04X".format(response.getStatusWord())}")
+                    }
+                }
+            }
+        }
+
+        private fun readRecordsDirectly(ctx: AppContext) {
+            for ((sfi, records) in DIRECT_READ_LOCATIONS) {
+                for (record in records) {
+                    val response = transmitOrNull(ApduBuilder.readRecord(record, sfi)) ?: return
+                    if (response.isSuccess()) {
+                        ctx.merge(TlvParser.parse(response.getData()))
+                        emvLog("direct READ_RECORD SFI=$sfi record=$record ok")
+                    }
+                }
+            }
+        }
+
+        /**
+         * Optional extras (cardholder name, PIN tries, expiry) that cost more APDUs.
+         * Skipped when there is no PAN to decorate, when the link is gone, and for wallets:
+         * Token Requestor ID (9F19) is wallet-only, and wallets tear down their HCE session
+         * after the AFL exchange, so further APDUs would only stall until timeout.
+         */
+        private fun enhance(ctx: AppContext, aflSfis: Set<Int>?) {
+            if (ctx.pan == null || linkFailure != null) return
+            if (ctx.tlv.containsKey(TlvParser.TAG_TOKEN_REQUESTOR_ID)) {
+                emvLog("wallet detected (9F19 present) — skipping enhancement scan")
+                return
+            }
+            if (aflSfis != null && TlvParser.extractCardholderName(ctx.tlv) == null) {
+                probeExtraRecordsForName(ctx, aflSfis)
+            }
+            getDataIfMissing(ctx, 0x5F, 0x20) { TlvParser.extractCardholderName(it) != null }
+            getDataIfMissing(ctx, 0x9F, 0x17) { TlvParser.extractPinTryCounter(it) != null }
+            getDataIfMissing(ctx, 0x5F, 0x24) { TlvParser.extractExpiry(it) != null }
+            logTlv("after_GET_DATA", ctx.tlv)
+        }
+
+        /**
+         * Read records from SFIs not already covered by AFL, looking for 5F20.
+         * SFI 1 is the most common extra location for cardholder data on Visa.
+         */
+        private fun probeExtraRecordsForName(ctx: AppContext, aflSfis: Set<Int>) {
+            for (sfi in (1..10).filter { it !in aflSfis }) {
+                for (record in 1..5) {
+                    val response = transmitOrNull(ApduBuilder.readRecord(record, sfi)) ?: return
+                    if (response.isSuccess()) {
+                        ctx.merge(TlvParser.parse(response.getData()))
+                        if (TlvParser.extractCardholderName(ctx.tlv) != null) {
+                            emvLog("probe: name found in SFI=$sfi record=$record")
                             return
                         }
-                    } else {
-                        val sw = response.getStatusWord()
-                        emvLog("probe READ_RECORD SFI=$sfi record=$record SW=${"%04X".format(sw)}")
-                        if (sw == 0x6A83 || sw == 0x6A82 || sw == 0x6982) break
+                    } else if (response.getStatusWord() in PROBE_STOP_STATUS_WORDS) {
+                        break
                     }
-                } catch (e: Exception) {
-                    emvLog("probe READ_RECORD SFI=$sfi record=$record ex=${e.message}")
-                    break
                 }
             }
         }
-        emvLog("probeExtraRecords: name still null after probing")
-    }
 
-    /** Try GET DATA for tag 5F20 when AFL did not yield the cardholder name. */
-    private fun mergeCardholderFromGetData(isoDep: IsoDep) {
-        if (TlvParser.extractCardholderName(collectedTlvData) != null) {
-            emvLog("GET_DATA 5F20: skip (name already in TLV map)")
-            return
-        }
-        for (cla in intArrayOf(0x80, 0x00)) {
-            try {
-                val cmd = ApduBuilder.getData(0x5F, 0x20, cla)
-                val resp = isoDep.transceive(cmd)
-                logApduResult("GET_DATA 5F20 CLA=${"%02X".format(cla)}", cmd, resp)
-                if (!resp.isSuccess()) {
-                    emvLog("GET_DATA 5F20 CLA=${"%02X".format(cla)} failed SW=${"%04X".format(resp.getStatusWord())}")
-                    continue
-                }
-                val data = resp.getData()
-                if (data.isEmpty()) {
-                    emvLog("GET_DATA 5F20 CLA=${"%02X".format(cla)} empty body")
-                    continue
-                }
-                val parsed = TlvParser.parse(data)
-                emvLog("GET_DATA 5F20 parsed tags=${parsed.keys.sorted().joinToString(",")}")
-                collectedTlvData.putAll(parsed)
-                if (TlvParser.extractCardholderName(collectedTlvData) != null) {
-                    emvLog("GET_DATA 5F20: extractCardholderName now ok")
-                    return
-                }
-            } catch (e: Exception) {
-                emvLog("GET_DATA 5F20 CLA=${"%02X".format(cla)} exception=${e.message}")
-            }
-        }
-        emvLog("GET_DATA 5F20: exhausted; name still null")
-    }
-
-    /** GET DATA for tag 9F17 (PIN try counter); merges into [collectedTlvData] on success. */
-    private fun mergePinTryCounterFromGetData(isoDep: IsoDep) {
-        if (TlvParser.extractPinTryCounter(collectedTlvData) != null) {
-            emvLog("GET_DATA 9F17: skip (already in TLV map)")
-            return
-        }
-        for (cla in intArrayOf(0x80, 0x00)) {
-            try {
-                val cmd = ApduBuilder.getData(0x9F, 0x17, cla)
-                val resp = isoDep.transceive(cmd)
-                logApduResult("GET_DATA 9F17 CLA=${"%02X".format(cla)}", cmd, resp)
-                if (!resp.isSuccess()) {
-                    emvLog("GET_DATA 9F17 CLA=${"%02X".format(cla)} failed SW=${"%04X".format(resp.getStatusWord())}")
-                    continue
-                }
-                val data = resp.getData()
+        /** GET DATA for one tag (CLA 80, then 00) unless [isPresent] already holds. */
+        private fun getDataIfMissing(
+            ctx: AppContext,
+            tagHigh: Int,
+            tagLow: Int,
+            isPresent: (Map<String, TlvParser.TlvData>) -> Boolean
+        ) {
+            if (isPresent(ctx.tlv)) return
+            for (cla in intArrayOf(0x80, 0x00)) {
+                val cmd = ApduBuilder.getData(tagHigh, tagLow, cla)
+                val response = transmitOrNull(cmd) ?: return
+                logApduResult("GET_DATA %02X%02X CLA=%02X".format(tagHigh, tagLow, cla), cmd, response)
+                if (!response.isSuccess()) continue
+                val data = response.getData()
                 if (data.isEmpty()) continue
-                val parsed = TlvParser.parse(data)
-                emvLog("GET_DATA 9F17 parsed tags=${parsed.keys.sorted().joinToString(",")}")
-                collectedTlvData.putAll(parsed)
-                if (TlvParser.extractPinTryCounter(collectedTlvData) != null) {
-                    emvLog("GET_DATA 9F17: pin try counter=${TlvParser.extractPinTryCounter(collectedTlvData)}")
-                    return
-                }
-            } catch (e: Exception) {
-                emvLog("GET_DATA 9F17 CLA=${"%02X".format(cla)} exception=${e.message}")
+                ctx.merge(TlvParser.parse(data))
+                if (isPresent(ctx.tlv)) return
             }
         }
-        emvLog("GET_DATA 9F17: exhausted or unsupported")
-    }
 
-    /** GET DATA for tag 5F24 (expiry); merges into [collectedTlvData] on success. */
-    private fun mergeExpiryFromGetData(isoDep: IsoDep) {
-        if (TlvParser.extractExpiry(collectedTlvData) != null) {
-            emvLog("GET_DATA 5F24: skip (already in TLV map)")
-            return
-        }
-        for (cla in intArrayOf(0x80, 0x00)) {
-            try {
-                val cmd = ApduBuilder.getData(0x5F, 0x24, cla)
-                val resp = isoDep.transceive(cmd)
-                logApduResult("GET_DATA 5F24 CLA=${"%02X".format(cla)}", cmd, resp)
-                if (!resp.isSuccess()) continue
-                val data = resp.getData()
-                if (data.isEmpty()) continue
-                val parsed = TlvParser.parse(data)
-                emvLog("GET_DATA 5F24 parsed tags=${parsed.keys.sorted().joinToString(",")}")
-                collectedTlvData.putAll(parsed)
-                if (TlvParser.extractExpiry(collectedTlvData) != null) {
-                    emvLog("GET_DATA 5F24: expiry=${TlvParser.extractExpiry(collectedTlvData)}")
-                    return
-                }
+        /** Sends [command]. A transport failure is remembered and rethrown. */
+        private fun transmit(command: ByteArray): ByteArray {
+            linkFailure?.let { throw it }
+            return try {
+                transport.transceive(command)
             } catch (e: Exception) {
-                emvLog("GET_DATA 5F24 CLA=${"%02X".format(cla)} exception=${e.message}")
+                linkFailure = e
+                throw e
             }
         }
-        emvLog("GET_DATA 5F24: exhausted or unsupported")
-    }
 
-    private fun tryGpoWithVariants(isoDep: IsoDep, pdol: ByteArray?): ByteArray {
-        for ((index, ttq) in EmvConstants.TTQ_VARIANTS.withIndex()) {
-            val pdolData = buildPdolData(pdol, ttq)
-            val command = ApduBuilder.gpo(pdolData)
-            
-            try {
-                val response = isoDep.transceive(command)
-                
-                if (response.isSuccess()) return response
-                
-                val sw = response.getStatusWord()
-                if (sw != 0x6985 && sw != 0x6984 && sw != 0x6A81) {
-                    return response
-                }
+        /** Like [transmit], but returns null on failure — and without sending once the link is gone. */
+        private fun transmitOrNull(command: ByteArray): ByteArray? {
+            if (linkFailure != null) return null
+            return try {
+                transmit(command)
             } catch (e: Exception) {
-                // Continue with next variant
+                emvLog("transport failed: ${e.message} — no further APDUs will be sent")
+                null
             }
         }
-        
-        return isoDep.transceive(ApduBuilder.gpo(buildPdolData(pdol, EmvConstants.TTQ_VARIANTS[0])))
     }
 
-    private fun buildPdolData(pdol: ByteArray?, ttq: ByteArray): ByteArray? {
-        if (pdol == null || pdol.isEmpty()) return null
+    private fun createSuccess(pan: String, ctx: AppContext): CardData.Success {
+        val cardType = CardType.detect(pan).takeUnless { it == CardType.UNKNOWN }
+            ?: CardType.fromAid(ctx.aidHex)
 
-        val data = mutableListOf<Byte>()
+        // Detect payment source (physical card vs digital wallet)
+        val detectionResult = CardSourceDetector.detect(ctx.tlv)
+
+        return CardData.Success(
+            pan = pan,
+            formattedPan = pan.formatPan(),
+            maskedPan = pan.maskPan(),
+            cardType = cardType,
+            paymentSource = detectionResult.source,
+            sourceDetectionResult = detectionResult,
+            cardholderName = TlvParser.extractCardholderName(ctx.tlv),
+            aid = ctx.aidHex,
+            pinTriesRemaining = TlvParser.extractPinTryCounter(ctx.tlv),
+            expiryDate = TlvParser.extractExpiry(ctx.tlv)
+        )
+    }
+
+    /** PDOL as (tag, requested length) pairs, in order. */
+    private fun parsePdol(pdol: ByteArray?): List<Pair<String, Int>> {
+        if (pdol == null) return emptyList()
+        val entries = mutableListOf<Pair<String, Int>>()
         var offset = 0
-
         while (offset < pdol.size) {
-            val (tag, newOffset) = parsePdolTag(pdol, offset)
-            offset = newOffset
-            if (offset >= pdol.size) break
-
-            val length = pdol[offset++].toInt() and 0xFF
-            val tagData = if (tag == "9F66") ttq.copyOf(length) else getTerminalData(tag, length)
-            data.addAll(tagData.toList())
+            val (tag, afterTag) = parsePdolTag(pdol, offset)
+            if (afterTag >= pdol.size) break
+            entries += tag to (pdol[afterTag].toInt() and 0xFF)
+            offset = afterTag + 1
         }
+        return entries
+    }
 
+    private fun buildPdolData(entries: List<Pair<String, Int>>, ttq: ByteArray): ByteArray? {
+        if (entries.isEmpty()) return null
+        val data = mutableListOf<Byte>()
+        for ((tag, length) in entries) {
+            val value = if (tag == TAG_TTQ) ttq.copyOf(length) else getTerminalData(tag, length)
+            data.addAll(value.toList())
+        }
         return data.toByteArray()
     }
 
@@ -501,19 +418,18 @@ class EmvCardReader(
         val tagBytes = mutableListOf<Byte>()
         val firstByte = data[offset++]
         tagBytes.add(firstByte)
-        
+
         if ((firstByte.toInt() and 0x1F) == 0x1F) {
             while (offset < data.size && (data[offset].toInt() and 0x80) != 0) {
                 tagBytes.add(data[offset++])
             }
             if (offset < data.size) tagBytes.add(data[offset++])
         }
-        
+
         return Pair(tagBytes.toHex(), offset)
     }
 
     private fun getTerminalData(tag: String, length: Int): ByteArray = when (tag) {
-        "9F66" -> byteArrayOf(0x27, 0x00, 0x00, 0x00).copyOf(length)
         "9F02" -> ByteArray(length).also { if (it.isNotEmpty()) it[it.size - 1] = 0x01 }
         "9F03" -> ByteArray(length)
         "9F1A" -> byteArrayOf(0x08, 0x40).copyOf(length)
@@ -539,77 +455,29 @@ class EmvCardReader(
         else -> ByteArray(length)
     }
 
-    private fun tryDirectRecordRead(isoDep: IsoDep): CardData {
-        emvLog("tryDirectRecordRead: start")
-        logCollectedTlv("direct_before_scan")
-        val locations = listOf(
-            1 to (1..4), 2 to (1..4), 3 to (1..2), 4 to (1..2)
-        )
-        var foundPan: String? = TlvParser.extractPan(collectedTlvData)?.takeIf { it.isValidPan() }
-        for ((sfi, range) in locations) {
-            for (record in range) {
-                try {
-                    val readCmd = ApduBuilder.readRecord(record, sfi)
-                    val response = isoDep.transceive(readCmd)
-                    if (response.isSuccess()) {
-                        val recordData = TlvParser.parse(response.getData())
-                        val newTags = recordData.keys.filter { it !in collectedTlvData.keys }.sorted()
-                        collectedTlvData.putAll(recordData)
-                        emvLog(
-                            "direct READ_RECORD SFI=$sfi record=$record newTags=${newTags.joinToString(",")} " +
-                                "has5F20=${recordData.containsKey(TlvParser.TAG_CARDHOLDER_NAME)}"
-                        )
-                        if (foundPan == null) {
-                            TlvParser.extractPan(recordData)?.let { pan ->
-                                if (pan.isValidPan()) foundPan = pan
-                            }
-                        }
-                    } else if (config.debugEmv) {
-                        emvLog(
-                            "direct READ_RECORD SFI=$sfi record=$record SW=${
-                                "%04X".format(response.getStatusWord())
-                            }"
-                        )
-                    }
-                } catch (e: Exception) {
-                    emvLog("direct READ_RECORD SFI=$sfi record=$record ex=${e.message}")
-                }
-            }
-        }
-        logCollectedTlv("direct_after_scan")
-        if (collectedTlvData.containsKey(TlvParser.TAG_TOKEN_REQUESTOR_ID)) {
-            emvLog("wallet detected (9F19 present) — skipping GET_DATA enhancement scan (direct)")
-        } else {
-            mergeCardholderFromGetData(isoDep)
-            mergePinTryCounterFromGetData(isoDep)
-            mergeExpiryFromGetData(isoDep)
-            logCollectedTlv("direct_after_GET_DATA")
-        }
-        foundPan?.let {
-            emvLog("tryDirectRecordRead success last4=${it.takeLast(4)} name=${TlvParser.extractCardholderName(collectedTlvData)}")
-            return createSuccess(it)
-        }
-        emvLog("tryDirectRecordRead: PAN_NOT_FOUND")
-        return CardData.Error(ErrorCode.PAN_NOT_FOUND, "Could not read card number")
+    private fun emvLog(msg: String) {
+        if (!config.debugEmv) return
+        Log.d(LOG_TAG, msg)
     }
 
-    private fun createSuccess(pan: String): CardData.Success {
-        val cardType = CardType.detect(pan)
-        
-        // Detect payment source (physical card vs digital wallet)
-        val detectionResult = CardSourceDetector.detect(collectedTlvData)
-        
-        return CardData.Success(
-            pan = pan,
-            formattedPan = pan.formatPan(),
-            maskedPan = pan.maskPan(),
-            cardType = cardType,
-            paymentSource = detectionResult.source,
-            sourceDetectionResult = detectionResult,
-            cardholderName = TlvParser.extractCardholderName(collectedTlvData),
-            aid = TlvParser.extractAid(collectedTlvData),
-            pinTriesRemaining = TlvParser.extractPinTryCounter(collectedTlvData),
-            expiryDate = TlvParser.extractExpiry(collectedTlvData)
+    /** Log sorted tag keys and the decoded name / expiry, if any. */
+    private fun logTlv(phase: String, tlv: Map<String, TlvParser.TlvData>) {
+        if (!config.debugEmv) return
+        val name = TlvParser.extractCardholderName(tlv)
+        val expiry = TlvParser.extractExpiry(tlv)
+        emvLog(
+            "[$phase] tagCount=${tlv.size} keys=${tlv.keys.sorted().joinToString(",")} " +
+                "name=${name?.let { "\"$it\"" } ?: "null"} " +
+                "expiry=${expiry?.let { "${it.year}-${"%02d".format(it.month)}" } ?: "null"}"
+        )
+    }
+
+    private fun logApduResult(label: String, command: ByteArray, response: ByteArray) {
+        if (!config.debugEmv) return
+        emvLog(
+            "$label cmd=${command.toHex().hexPreview(48)} ok=${response.isSuccess()} " +
+                "SW=${"%04X".format(response.getStatusWord())} dataLen=${response.getData().size} " +
+                "dataHex=${response.getData().toHex().hexPreview()}"
         )
     }
 }
@@ -629,6 +497,7 @@ data class ReaderConfig(
 // Extension functions
 private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
 private fun List<Byte>.toHex(): String = joinToString("") { "%02X".format(it) }
+private fun String.hexToBytes(): ByteArray = chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 private fun ByteArray.isSuccess(): Boolean = size >= 2 && this[size - 2] == 0x90.toByte() && this[size - 1] == 0x00.toByte()
 private fun ByteArray.getData(): ByteArray = if (size > 2) copyOfRange(0, size - 2) else byteArrayOf()
 private fun ByteArray.getStatusWord(): Int = if (size >= 2) ((this[size - 2].toInt() and 0xFF) shl 8) or (this[size - 1].toInt() and 0xFF) else 0
@@ -652,4 +521,3 @@ private fun String.maskPan(): String = if (length >= 8) "${take(4)} **** **** ${
 
 private fun String.hexPreview(maxChars: Int = 160): String =
     if (length <= maxChars) this else take(maxChars) + "…(${length} hex chars)"
-

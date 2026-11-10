@@ -26,6 +26,16 @@ class AidLabelsTest {
     }
 
     @Test
+    fun aidLabels_visaElectron() {
+        assertEquals("Visa Electron", AidLabels.displayName("A0000000032010"))
+    }
+
+    @Test
+    fun aidLabels_maestro() {
+        assertEquals("Maestro", AidLabels.displayName("A0000000043060"))
+    }
+
+    @Test
     fun aidLabels_unknown_returnsNull() {
         assertNull(AidLabels.displayName("DEADBEEF"))
     }

@@ -34,12 +34,10 @@ object AidLabels {
     fun displayName(aidHex: String): String? {
         val a = aidHex.uppercase()
         return when {
-            a.startsWith("A0000000031010") ||
-                a.startsWith("A0000000032010") -> "Visa Credit/Debit"
+            a.startsWith("A0000000031010") -> "Visa Credit/Debit"
+            a.startsWith("A0000000032010") -> "Visa Electron"
             a.startsWith("A000000003") -> "Visa"
-            a.startsWith("A0000000041010") ||
-                a.startsWith("A0000000043060") ||
-                a.startsWith("A0000000043010") -> "Mastercard"
+            a.startsWith("A0000000043060") -> "Maestro"
             a.startsWith("A000000004") -> "Mastercard"
             a.startsWith("A000000025") -> "American Express"
             a.startsWith("A0000001523010") -> "Discover"
@@ -66,7 +64,8 @@ sealed class CardData {
      * @property paymentSource Source of the payment (physical card, Google Wallet, Samsung Pay, etc.)
      * @property sourceDetectionResult Detailed detection result with confidence and debug info
      * @property cardholderName Cardholder name from EMV tag 5F20 when present. Often **null** on contactless for privacy.
-     * @property aid Selected payment application identifier (tag `4F`), uppercase hex without spaces.
+     * @property aid Identifier of the application that was actually read (DF name `84` from SELECT,
+     *               else the directory `4F`), uppercase hex without spaces.
      * @property pinTriesRemaining Offline PIN tries left (tag `9F17`) when the card exposes it; often **null** on contactless.
      * @property expiryDate Application expiration date from tag `5F24` (`MM/YY`). **null** when card omits it.
      */
@@ -152,6 +151,21 @@ enum class CardType(val displayName: String) {
             pan.startsWith("62") -> UNIONPAY
             pan.startsWith("35") -> JCB
             pan.startsWith("220") -> MIR
+            else -> UNKNOWN
+        }
+
+        /**
+         * Brand from the application's RID (first 5 bytes of the AID), e.g. Maestro → [MASTERCARD].
+         * Use when [detect] can't place the PAN. Returns [UNKNOWN] for unrecognised RIDs.
+         */
+        fun fromAid(aidHex: String?): CardType = when (aidHex?.uppercase()?.take(10)) {
+            "A000000003" -> VISA
+            "A000000004" -> MASTERCARD
+            "A000000025" -> AMEX
+            "A000000152" -> DISCOVER
+            "A000000333" -> UNIONPAY
+            "A000000065" -> JCB
+            "A000000658" -> MIR
             else -> UNKNOWN
         }
     }
