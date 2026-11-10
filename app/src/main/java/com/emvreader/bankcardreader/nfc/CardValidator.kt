@@ -15,6 +15,7 @@ object CardValidator {
         UNIONPAY("UnionPay"),
         MIR("Mir"),
         DINERS("Diners Club"),
+        ARCA("ArCa"),
         UNKNOWN("Unknown")
     }
 
@@ -97,6 +98,9 @@ object CardValidator {
             digits.startsWith("36") || digits.startsWith("38") || digits.startsWith("39") ||
             (digits.substring(0, 3).toIntOrNull()?.let { it in 300..305 } == true) ->
                 CardType.DINERS
+
+            // ArCa (Armenia): 9051
+            digits.startsWith("9051") -> CardType.ARCA
 
             else -> CardType.UNKNOWN
         }

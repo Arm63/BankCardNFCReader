@@ -134,6 +134,7 @@ class NfcReaderViewModel : ViewModel() {
             com.emvreader.nfc.CardType.JCB -> CardValidator.CardType.JCB
             com.emvreader.nfc.CardType.UNIONPAY -> CardValidator.CardType.UNIONPAY
             com.emvreader.nfc.CardType.MIR -> CardValidator.CardType.MIR
+            com.emvreader.nfc.CardType.ARCA -> CardValidator.CardType.ARCA
             com.emvreader.nfc.CardType.UNKNOWN -> CardValidator.CardType.UNKNOWN
         }
     }

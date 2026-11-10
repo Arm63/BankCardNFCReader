@@ -46,7 +46,7 @@
 - **AID + friendly name** via `AidLabels` (Visa Credit/Debit, Mastercard, Amex, …)
 - **Offline PIN tries remaining** via tag `9F17`
 - **Card expiry (`5F24`)** with `isExpired()` helper and `MM/YY` / `MM/YYYY` display
-- **Multi-brand**: Visa, Mastercard, American Express, Discover, UnionPay, JCB, Mir
+- **Multi-brand**: Visa, Mastercard, American Express, Discover, UnionPay, JCB, Mir, ArCa
 - **Payment Source Detection**: physical card vs Google Wallet, Apple Pay, Samsung Pay, Garmin Pay, Fitbit Pay
 - **Form Factor (`9F6E`) + Token Requestor ID (`9F19`) parsing** for wallet identification
 - **Read-only**: cannot make payments or modify card data
@@ -272,6 +272,7 @@ enum class PaymentSource {
 | UnionPay | ✅ | Starts with 62 |
 | JCB | ✅ | Starts with 35 |
 | Mir | ✅ | Starts with 220 |
+| ArCa (Armenia) | ✅ | Starts with 9051 (chip often carries a Mir app; brand comes from the PAN) |
 
 ### Error codes
 

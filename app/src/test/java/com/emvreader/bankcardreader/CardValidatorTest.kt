@@ -72,6 +72,11 @@ class CardValidatorTest {
     }
 
     @Test
+    fun detectCardType_arca() {
+        assertEquals(CardValidator.CardType.ARCA, CardValidator.detectCardType("9051000000000009"))
+    }
+
+    @Test
     fun maskCardNumber_amex_keepsAmexGrouping() {
         assertEquals("**** ****** *0005", CardValidator.maskCardNumber("378282246310005"))
     }

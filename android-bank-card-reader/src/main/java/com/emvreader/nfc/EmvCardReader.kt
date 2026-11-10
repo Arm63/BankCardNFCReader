@@ -21,6 +21,7 @@ import java.util.Calendar
  * - UnionPay
  * - JCB
  * - Mir
+ * - ArCa (Armenia; brand from PAN prefix 9051 — these cards often run a Mir application)
  *
  * Also detects payment source (physical card vs digital wallets):
  * - Physical cards (traditional plastic EMV cards)

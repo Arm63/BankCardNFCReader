@@ -137,6 +137,7 @@ enum class CardType(val displayName: String) {
     UNIONPAY("UnionPay"),
     JCB("JCB"),
     MIR("Mir"),
+    ARCA("ArCa"),
     UNKNOWN("Unknown");
 
     companion object {
@@ -151,6 +152,9 @@ enum class CardType(val displayName: String) {
             pan.startsWith("62") -> UNIONPAY
             pan.startsWith("35") -> JCB
             pan.startsWith("220") -> MIR
+            // Armenian national scheme. Checked by PAN because ArCa cards often carry only
+            // a Mir application (AID A0000006581010), so the AID would say "Mir".
+            pan.startsWith("9051") -> ARCA
             else -> UNKNOWN
         }
 

@@ -72,6 +72,14 @@ class NfcReaderViewModelTest {
     }
 
     @Test
+    fun arcaRead_showsArcaBrand() {
+        val vm = scanningViewModel()
+        vm.processRead { success.copy(pan = "9051000000000009", cardType = CardType.ARCA) }
+        val state = vm.uiState.value as NfcReaderUiState.Success
+        assertEquals(CardValidator.CardType.ARCA, state.cardType)
+    }
+
+    @Test
     fun read_isIgnoredWhenNotScanning() {
         val vm = NfcReaderViewModel()
         vm.processRead { success }

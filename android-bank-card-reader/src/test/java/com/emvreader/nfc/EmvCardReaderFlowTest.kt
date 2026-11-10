@@ -118,6 +118,15 @@ class EmvCardReaderFlowTest {
     }
 
     @Test
+    fun arcaCardRunningMirApplication_isArca() {
+        // Armenian ArCa card (PAN 9051…) whose only application is Mir's (A0000006581010, label "MIR").
+        val card = FakeCard(ppseFci(ppseEntry(MIR_AID, priority = 1)) + "9000")
+            .install(MIR_AID, simpleApp(MIR_AID, "MIR", "9051000000000009"))
+
+        assertEquals(CardType.ARCA, reader.read(card).success().cardType)
+    }
+
+    @Test
     fun maestroPanOutsideBinTable_getsBrandFromAid() {
         val card = FakeCard(ppseFci(ppseEntry(MAESTRO_AID, "MAESTRO", 1)) + "9000")
             .install(MAESTRO_AID, simpleApp(MAESTRO_AID, "MAESTRO", "6759649826438453"))
