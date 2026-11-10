@@ -72,6 +72,11 @@ class CardValidatorTest {
     }
 
     @Test
+    fun maskCardNumber_amex_keepsAmexGrouping() {
+        assertEquals("**** ****** *0005", CardValidator.maskCardNumber("378282246310005"))
+    }
+
+    @Test
     fun cleanCardNumber_withSpaces_returnsDigitsOnly() {
         assertEquals("4111111111111111", CardValidator.cleanCardNumber("4111 1111 1111 1111"))
     }

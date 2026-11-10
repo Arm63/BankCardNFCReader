@@ -108,22 +108,7 @@ object CardValidator {
      */
     fun formatCardNumber(cardNumber: String): String {
         val digits = cardNumber.filter { it.isDigit() }
-        
-        return when (detectCardType(digits)) {
-            CardType.AMEX -> {
-                // Amex format: 4-6-5 (xxxx xxxxxx xxxxx)
-                buildString {
-                    digits.forEachIndexed { index, c ->
-                        if (index == 4 || index == 10) append(' ')
-                        append(c)
-                    }
-                }
-            }
-            else -> {
-                // Standard format: 4-4-4-4
-                digits.chunked(4).joinToString(" ")
-            }
-        }
+        return group(digits, detectCardType(digits))
     }
 
     /**
@@ -132,13 +117,23 @@ object CardValidator {
      */
     fun maskCardNumber(cardNumber: String): String {
         val digits = cardNumber.filter { it.isDigit() }
-        
+
         if (digits.length < 4) return cardNumber
 
-        val lastFour = digits.takeLast(4)
-        val masked = "*".repeat(digits.length - 4) + lastFour
-        
-        return formatCardNumber(masked)
+        val masked = "*".repeat(digits.length - 4) + digits.takeLast(4)
+        // Group by the real number's brand; the masked string itself has no digits to detect from.
+        return group(masked, detectCardType(digits))
+    }
+
+    /** Amex 4-6-5 (xxxx xxxxxx xxxxx), everything else 4-4-4-4. */
+    private fun group(chars: String, type: CardType): String = when (type) {
+        CardType.AMEX -> buildString {
+            chars.forEachIndexed { index, c ->
+                if (index == 4 || index == 10) append(' ')
+                append(c)
+            }
+        }
+        else -> chars.chunked(4).joinToString(" ")
     }
 
     /**

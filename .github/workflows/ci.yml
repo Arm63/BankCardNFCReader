@@ -33,8 +33,14 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Run unit tests
+      - name: Run library unit tests
         run: ./gradlew :android-bank-card-reader:test --stacktrace
 
-      - name: Assemble release
+      - name: Run app unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Assemble library release
         run: ./gradlew :android-bank-card-reader:assembleRelease --stacktrace
+
+      - name: Assemble demo app
+        run: ./gradlew :app:assembleDebug --stacktrace

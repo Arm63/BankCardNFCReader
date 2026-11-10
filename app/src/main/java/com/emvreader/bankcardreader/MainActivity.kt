@@ -5,11 +5,13 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.getSystemService
@@ -17,9 +19,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.emvreader.bankcardreader.nfc.NfcManager
+import com.emvreader.bankcardreader.ui.HapticEvent
 import com.emvreader.bankcardreader.ui.NfcReaderScreen
-import com.emvreader.bankcardreader.ui.NfcReaderUiState
 import com.emvreader.bankcardreader.ui.NfcReaderViewModel
+import com.emvreader.bankcardreader.ui.showsCardData
 import com.emvreader.bankcardreader.ui.theme.BankCardReaderTheme
 import kotlinx.coroutines.launch
 
@@ -34,14 +37,13 @@ class MainActivity : ComponentActivity() {
         
         nfcManager = NfcManager.create(this)
         
-        // Observe UI state for haptic feedback
+        // One-shot haptic feedback per finished read
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.uiState.collect { state ->
-                    when (state) {
-                        is NfcReaderUiState.Success -> vibrate(VibrationPattern.SUCCESS)
-                        is NfcReaderUiState.Error -> vibrate(VibrationPattern.ERROR)
-                        else -> { /* no vibration */ }
+                viewModel.hapticEvents.collect { event ->
+                    when (event) {
+                        HapticEvent.SUCCESS -> vibrate(VibrationPattern.SUCCESS)
+                        HapticEvent.ERROR -> vibrate(VibrationPattern.ERROR)
                     }
                 }
             }
@@ -52,6 +54,9 @@ class MainActivity : ComponentActivity() {
                 val uiState by viewModel.uiState.collectAsState()
                 val nfcStatus by viewModel.nfcStatus.collectAsState()
                 val cardNumber by viewModel.cardNumber.collectAsState()
+
+                val showsCardData = uiState.showsCardData(cardNumber)
+                LaunchedEffect(showsCardData) { setScreenSecure(showsCardData) }
 
                 NfcReaderScreen(
                     uiState = uiState,
@@ -72,29 +77,36 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Update NFC status
         viewModel.updateNfcStatus(nfcManager.getNfcStatus())
-        // Enable foreground dispatch when scanning
-        if (nfcManager.hasNfc() && nfcManager.isNfcEnabled()) {
-            nfcManager.enableForegroundDispatch(this)
+        // Reader mode while in the foreground: cards go straight to us (no NDEF check, no
+        // other app grabbing the tag). The callback runs on a binder thread.
+        if (nfcManager.isNfcEnabled()) {
+            nfcManager.enableReaderMode(this) { tag -> viewModel.processTag(tag) }
         }
     }
 
     override fun onPause() {
         super.onPause()
-        // Disable foreground dispatch
-        if (nfcManager.hasNfc()) {
-            nfcManager.disableForegroundDispatch(this)
-        }
+        nfcManager.disableReaderMode(this)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        
-        // Handle NFC intent
+
+        // Card tapped while the app was in the background (manifest TECH_DISCOVERED filter)
         if (nfcManager.isNfcIntent(intent)) {
             nfcManager.getTagFromIntent(intent)?.let { tag ->
                 viewModel.processTag(tag)
             }
+        }
+    }
+
+    /** Keeps card data out of screenshots, screen recordings and the Recents thumbnail. */
+    private fun setScreenSecure(secure: Boolean) {
+        if (secure) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
     }
 

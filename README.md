@@ -122,7 +122,8 @@ class MainActivity : AppCompatActivity() {
         nfcAdapter?.enableReaderMode(
             this,
             { tag -> handleNfcTag(tag) },
-            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B,
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
+                NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
             null
         )
     }
@@ -175,7 +176,8 @@ fun CardReaderScreen() {
                     cardData = cardReader.readCard(tag)
                 }
             },
-            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B,
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
+                NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
             null
         )
         onDispose { nfcAdapter?.disableReaderMode(activity) }

@@ -1,19 +1,16 @@
 package com.emvreader.bankcardreader.nfc
 
 import android.app.Activity
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.nfc.NfcAdapter
 import android.nfc.Tag
-import android.nfc.tech.IsoDep
 import android.os.Build
 import android.provider.Settings
 
 /**
  * Manager for NFC adapter operations.
- * Handles NFC availability checking and foreground dispatch.
+ * Handles NFC availability checking and reader mode.
  */
 class NfcManager(private val context: Context) {
 
@@ -41,49 +38,31 @@ class NfcManager(private val context: Context) {
     }
 
     /**
-     * Enable foreground dispatch for NFC tag detection
-     * Must be called from Activity.onResume()
+     * Deliver NFC-A / NFC-B tags to [onTag] while [activity] is resumed.
+     * Must be called from Activity.onResume().
+     *
+     * Reader mode (rather than foreground dispatch) skips the platform NDEF check, which can
+     * disturb phone-wallet (HCE) sessions, and the platform sound — the app gives its own
+     * haptic feedback when the read finishes. [onTag] runs on a binder thread.
      */
-    fun enableForegroundDispatch(activity: Activity) {
-        nfcAdapter?.let { adapter ->
-            val intent = Intent(activity, activity.javaClass).apply {
-                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            }
-            
-            val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-            } else {
-                PendingIntent.FLAG_UPDATE_CURRENT
-            }
-            
-            val pendingIntent = PendingIntent.getActivity(
-                activity, 0, intent, pendingIntentFlags
-            )
-
-            // Filter for IsoDep (ISO 14443-4) tags - used by contactless payment cards
-            val techListsArray = arrayOf(
-                arrayOf(IsoDep::class.java.name)
-            )
-
-            val filters = arrayOf(
-                IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED)
-            )
-
-            adapter.enableForegroundDispatch(
-                activity, 
-                pendingIntent, 
-                filters, 
-                techListsArray
-            )
-        }
+    fun enableReaderMode(activity: Activity, onTag: (Tag) -> Unit) {
+        nfcAdapter?.enableReaderMode(
+            activity,
+            { tag -> onTag(tag) },
+            NfcAdapter.FLAG_READER_NFC_A or
+                NfcAdapter.FLAG_READER_NFC_B or
+                NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or
+                NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
+            null
+        )
     }
 
     /**
-     * Disable foreground dispatch
-     * Must be called from Activity.onPause()
+     * Stop reader mode.
+     * Must be called from Activity.onPause().
      */
-    fun disableForegroundDispatch(activity: Activity) {
-        nfcAdapter?.disableForegroundDispatch(activity)
+    fun disableReaderMode(activity: Activity) {
+        nfcAdapter?.disableReaderMode(activity)
     }
 
     /**

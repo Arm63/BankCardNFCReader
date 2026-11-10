@@ -11,9 +11,12 @@ import com.emvreader.nfc.EmvCardReader
 import com.emvreader.nfc.CardData
 import com.emvreader.nfc.PaymentSource
 import com.emvreader.nfc.ReaderConfig
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -26,9 +29,6 @@ class NfcReaderViewModel : ViewModel() {
 
     // Use library's EmvCardReader for enhanced detection
     private val libraryReader = EmvCardReader(ReaderConfig(debugEmv = BuildConfig.DEBUG))
-    
-    // Keep existing reader for fallback
-    private val cardReader = NfcCardReader()
 
     private val _uiState = MutableStateFlow<NfcReaderUiState>(NfcReaderUiState.Idle)
     val uiState: StateFlow<NfcReaderUiState> = _uiState.asStateFlow()
@@ -77,14 +77,25 @@ class NfcReaderViewModel : ViewModel() {
      * Process detected NFC tag using the library's EmvCardReader
      * which includes payment source detection (physical card vs digital wallet)
      */
-    fun processTag(tag: Tag) {
-        if (_uiState.value !is NfcReaderUiState.Scanning) return
+    fun processTag(tag: Tag) = processRead { libraryReader.readCard(tag) }
 
-        _uiState.value = NfcReaderUiState.Reading
+    private val _hapticEvents = Channel<HapticEvent>(Channel.BUFFERED)
+
+    /**
+     * Haptic feedback, one event per finished read. Delivered once — unlike [uiState],
+     * a new collector (e.g. after rotation) does not get the last event again.
+     */
+    val hapticEvents: Flow<HapticEvent> = _hapticEvents.receiveAsFlow()
+
+    internal fun processRead(read: suspend () -> CardData) {
+        // Atomic: reader-mode callbacks arrive on a binder thread.
+        if (!_uiState.compareAndSet(NfcReaderUiState.Scanning, NfcReaderUiState.Reading)) return
 
         viewModelScope.launch {
             // Use library's reader for payment source detection
-            when (val result = libraryReader.readCard(tag)) {
+            val result = read()
+            _hapticEvents.trySend(if (result is CardData.Success) HapticEvent.SUCCESS else HapticEvent.ERROR)
+            when (result) {
                 is CardData.Success -> {
                     _cardNumber.value = result.pan
                     _uiState.value = NfcReaderUiState.Success(
@@ -196,6 +207,13 @@ class NfcReaderViewModel : ViewModel() {
         }
     }
 }
+
+/** Haptic feedback for a finished card read. */
+enum class HapticEvent { SUCCESS, ERROR }
+
+/** True while the screen shows card data (read result or manual entry). */
+fun NfcReaderUiState.showsCardData(cardNumber: String): Boolean =
+    this is NfcReaderUiState.Success || cardNumber.isNotEmpty()
 
 /**
  * UI State for NFC Reader screen

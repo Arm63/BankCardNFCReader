@@ -13,18 +13,19 @@ Android NFC reader for extracting card numbers from contactless payment cards (E
 
 ## Project Structure
 
+EMV reading (APDUs, TLV parsing, wallet detection) lives in the `android-bank-card-reader`
+library (`EmvCardReader`). The demo app only adds NFC plumbing and UI:
+
 ```
-app/src/main/java/com/example/bankcardreader/
-├── MainActivity.kt              # Activity handling NFC intents
+app/src/main/java/com/emvreader/bankcardreader/
+├── MainActivity.kt              # Reader mode, haptics, FLAG_SECURE
 ├── nfc/
-│   ├── EmvUtils.kt              # APDU command builders
-│   ├── TlvParser.kt             # BER-TLV parser for EMV data
-│   ├── CardValidator.kt         # Luhn algorithm, card type detection
-│   ├── NfcCardReader.kt         # Card reading logic
-│   └── NfcManager.kt            # NFC adapter management
+│   ├── CardReadError.kt         # UI-facing error messages
+│   ├── CardValidator.kt         # Luhn, card type, formatting for manual entry
+│   └── NfcManager.kt            # NFC adapter status + reader mode
 └── ui/
     ├── NfcReaderScreen.kt       # Compose UI
-    ├── NfcReaderViewModel.kt    # State management
+    ├── NfcReaderViewModel.kt    # State management (calls EmvCardReader)
     └── theme/                   # Material 3 theming
 ```
 
@@ -40,12 +41,12 @@ app/src/main/java/com/example/bankcardreader/
 
 ### 2. Tech Filter (already configured)
 
-`res/xml/nfc_tech_filter.xml` - filters for IsoDep (ISO 14443-4) cards.
+`res/xml/nfc_tech_filter.xml` - IsoDep (ISO 14443-4) only, so plain NFC tags don't launch the app.
 
 ### 3. Activity Configuration
 
 - `launchMode="singleTop"` prevents multiple activity instances
-- Intent filter for `ACTION_TECH_DISCOVERED`
+- Intent filter for `ACTION_TECH_DISCOVERED` (card tapped while the app is in the background)
 
 ## Usage
 
@@ -54,25 +55,23 @@ app/src/main/java/com/example/bankcardreader/
 ```kotlin
 // In your transfer flow activity/fragment
 class TransferActivity : ComponentActivity() {
-    private val nfcManager = NfcManager.create(this)
+    private lateinit var nfcManager: NfcManager
     private val viewModel: NfcReaderViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        nfcManager = NfcManager.create(this)
+    }
 
     override fun onResume() {
         super.onResume()
         viewModel.updateNfcStatus(nfcManager.getNfcStatus())
-        nfcManager.enableForegroundDispatch(this)
+        nfcManager.enableReaderMode(this) { tag -> viewModel.processTag(tag) }
     }
 
     override fun onPause() {
         super.onPause()
-        nfcManager.disableForegroundDispatch(this)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        nfcManager.getTagFromIntent(intent)?.let { tag ->
-            viewModel.processTag(tag)
-        }
+        nfcManager.disableReaderMode(this)
     }
 }
 ```
@@ -80,17 +79,14 @@ class TransferActivity : ComponentActivity() {
 ### Reading Flow
 
 1. User taps "Scan Card" button
-2. `NfcManager.enableForegroundDispatch()` activates NFC reader
+2. Reader mode (enabled in `onResume`) delivers the tag — no NDEF check, no platform sound
 3. User holds card to phone
-4. `onNewIntent()` receives tag
-5. `NfcCardReader.readCard()` processes:
-   - SELECT PPSE → get available AIDs
+4. `EmvCardReader.readCard()` (library) processes:
+   - SELECT PPSE → every listed application, highest priority first
    - SELECT AID → select payment app
    - GET PROCESSING OPTIONS → get file locators
    - READ RECORD → extract PAN from records
-6. `TlvParser` extracts PAN from EMV TLV data
-7. `CardValidator` validates and formats
-8. UI shows result
+5. UI shows result; one haptic pulse per finished read
 
 ## EMV Commands
 
@@ -110,10 +106,8 @@ class TransferActivity : ComponentActivity() {
 ```
 
 Tests cover:
-- Luhn validation
-- Card type detection
-- TLV parsing
-- APDU command building
+- Library: TLV/PPSE parsing, wallet detection, and the full read flow against scripted cards
+- App: Luhn validation, card type detection, formatting/masking, ViewModel haptics and secure-screen rules
 
 ### Device Testing
 
@@ -145,8 +139,9 @@ Tests cover:
 
 - **Read-only**: Only extracts PAN, no transactions
 - **No persistence**: Card data not stored
-- **Memory cleared**: `clearCardData()` zeros out values after use
-- **No logging of PAN**: Sensitive data excluded from logs
+- **Cleared after use**: `clearCardData()` drops the card number once confirmed
+- **Screen protected**: `FLAG_SECURE` while card data is on screen (no screenshots, recordings or Recents thumbnail)
+- **Logging**: release builds log nothing; debug builds set `ReaderConfig(debugEmv = true)`, which logs raw APDUs including the PAN
 - **User consent**: Clear UI indication of card reading
 
 ## Error Handling
