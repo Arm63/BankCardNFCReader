@@ -99,11 +99,11 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Arm63:BankCardNFCReader:1.1.5")
+    implementation("com.github.Arm63:BankCardNFCReader:1.2.0")
 }
 ```
 
-> Latest version is shown on the JitPack badge above. Replace `1.1.5` if a newer release is published.
+> Latest version is shown on the JitPack badge above. Replace `1.2.0` if a newer release is published.
 
 ## Quick Start (View)
 
@@ -493,7 +493,34 @@ No. NFC card emulation between two real devices is required for wallet testing. 
 
 ## Changelog
 
-### v1.1.5 (Current)
+### v1.2.0 (Current)
+**Fixes**
+- Cards with several applications: every PPSE application is tried, highest priority (tag `87`) first; `aid` reports the application actually read
+- `KNOWN_AIDS` fallback now used when PPSE is missing or lists no applications; Mir fallback AID corrected (`A0000006581010`)
+- Wallet detection: tag `9F6E` decoded per scheme (Visa Form Factor Indicator, Mastercard Third Party Data) — physical cards are no longer reported as mobile wallets
+- UnionPay, RuPay and PayPass labels no longer flagged as wallets; Token Requestor IDs in EMV numeric format (leading zero) recognised
+- Reader stops after the first transport failure instead of stalling on timeouts when a wallet ends the session; the partial result is kept if the PAN was already read
+- Wallet reads (Token Requestor ID `9F19` present) skip the extra name / PIN / expiry scan
+- `00` / `FF` padding between TLV objects is skipped; GPO is sent once when the card has no PDOL
+- One `EmvCardReader` can safely serve overlapping reads; data from an application without a PAN no longer leaks into the next one
+- `DetectionResult.equals` / `hashCode` are consistent
+- AID labels: Visa Electron (`A0000000032010`), Maestro (`A0000000043060`)
+
+**New**
+- `CardType.ARCA` — Armenian ArCa cards (PAN prefix `9051`), including ArCa cards that run a Mir application
+- `CardType.fromAid()` — brand from the AID when the PAN prefix is unknown (e.g. Maestro → `MASTERCARD`)
+- `TlvParser.parsePpseApplications()` and `TlvParser.PpseApplication`
+
+**Behaviour changes**
+- New enum value `CardType.ARCA`: an exhaustive `when (cardType)` needs a new branch
+- No selectable application → `AID_NOT_FOUND` (was `PAN_NOT_FOUND`)
+- Card lost before the PAN was read → `TAG_LOST` / `COMMUNICATION_ERROR` (was `PAN_NOT_FOUND`); any `IOException` maps to `COMMUNICATION_ERROR`
+
+**Sample app**
+- Reader mode (`FLAG_READER_SKIP_NDEF_CHECK`) instead of foreground dispatch; IsoDep-only tech filter
+- One haptic pulse per read (no replay on rotation); `FLAG_SECURE` while card data is on screen
+
+### v1.1.5
 - Expose **Application Expiration Date** (EMV tag `5F24`) as `expiryDate: ExpiryDate?` on `CardData.Success`
 - `ExpiryDate.isExpired()`, `displayMmYy()`, `displayMmYyyy()` helpers
 - GET DATA `5F24` fallback when AFL records omit the tag
